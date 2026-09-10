@@ -1,263 +1,136 @@
-// ===== DigiPotek Data Store (localStorage) =====
-import { generateId, today } from './utils.js';
-import { seedProducts } from './data/seed.js';
+import { supabase } from './supabase.js';
+import { today, businessDate } from './utils.js';
 
-const STORE_KEYS = {
-  users: 'dp_users',
-  products: 'dp_products',
-  transactions: 'dp_transactions',
-  stockLog: 'dp_stock_log',
-  settings: 'dp_settings',
-  auth: 'dp_auth',
-};
+let session = null;
+let inventory = [];
+let transactionCache = [];
+let appSettings = null;
+let authEpoch = 0;
+function checked(result) { if (result.error) throw Object.assign(new Error(result.error.message), {code:result.error.code}); return result.data; }
+async function rpc(name, args) { return checked(await supabase.rpc(name, args)); }
+function clearCache() { session = null; inventory = []; transactionCache = []; appSettings = null; authEpoch++; }
 
-// ===== Generic CRUD =====
-function getAll(key) {
-  try {
-    return JSON.parse(localStorage.getItem(key)) || [];
-  } catch {
-    return [];
-  }
-}
-
-function saveAll(key, data) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
-
-function getById(key, id) {
-  return getAll(key).find(item => item.id === id);
-}
-
-function add(key, item) {
-  const data = getAll(key);
-  item.id = item.id || generateId();
-  item.createdAt = item.createdAt || new Date().toISOString();
-  data.push(item);
-  saveAll(key, data);
-  return item;
-}
-
-function update(key, id, updates) {
-  const data = getAll(key);
-  const idx = data.findIndex(item => item.id === id);
-  if (idx === -1) return null;
-  data[idx] = { ...data[idx], ...updates, updatedAt: new Date().toISOString() };
-  saveAll(key, data);
-  return data[idx];
-}
-
-function remove(key, id) {
-  const data = getAll(key).filter(item => item.id !== id);
-  saveAll(key, data);
-}
-
-// ===== Auth =====
 export const auth = {
-  login(username, password) {
-    const users = getAll(STORE_KEYS.users);
-    const user = users.find(u => u.username === username && u.password === password);
-    if (user) {
-      const session = { id: user.id, username: user.username, name: user.name, role: user.role };
-      localStorage.setItem(STORE_KEYS.auth, JSON.stringify(session));
-      return session;
-    }
-    return null;
+  getSession: () => session,
+  isLoggedIn: () => !!session,
+  isOwner: () => session?.role === 'owner' && session.active,
+  async refresh() {
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) { clearCache(); return null; }
+    const profile = checked(await supabase.from('staff').select('*').eq('id',data.user.id).single());
+    session = { ...profile, email:data.user.email };
+    return session;
   },
-  logout() {
-    localStorage.removeItem(STORE_KEYS.auth);
+  async login(email,password) {
+    checked(await supabase.auth.signInWithPassword({email,password}));
+    return this.refresh();
   },
-  getSession() {
-    try {
-      return JSON.parse(localStorage.getItem(STORE_KEYS.auth));
-    } catch {
-      return null;
-    }
+  async register(email,password,name) {
+    return checked(await supabase.auth.signUp({email,password,options:{data:{name}}}));
   },
-  isLoggedIn() {
-    return !!this.getSession();
+  async logout() {
+    checked(await supabase.auth.signOut({scope:'local'}));
+    clearCache();
   },
-  isOwner() {
-    const s = this.getSession();
-    return s && s.role === 'owner';
-  }
+  async claimOwner(token) { await rpc('claim_owner',{token}); return this.refresh(); },
 };
-
-// ===== Users =====
-export const users = {
-  getAll: () => getAll(STORE_KEYS.users),
-  getById: (id) => getById(STORE_KEYS.users, id),
-  add: (user) => add(STORE_KEYS.users, user),
-  update: (id, data) => update(STORE_KEYS.users, id, data),
-  remove: (id) => remove(STORE_KEYS.users, id),
-};
-
-// ===== Products =====
-export const products = {
-  getAll: () => getAll(STORE_KEYS.products).filter(p => !p.deleted),
-  getById: (id) => getById(STORE_KEYS.products, id),
-  add: (product) => add(STORE_KEYS.products, product),
-  update: (id, data) => update(STORE_KEYS.products, id, data),
-  remove: (id) => update(STORE_KEYS.products, id, { deleted: true }),
-  search(query, category = '') {
-    let data = this.getAll();
-    if (category) data = data.filter(p => p.category === category);
-    if (query) {
-      const q = query.toLowerCase();
-      data = data.filter(p => p.name.toLowerCase().includes(q));
-    }
-    return data;
-  },
-  getLowStock() {
-    return this.getAll().filter(p => p.stock <= p.minStock && p.stock > 0);
-  },
-  getOutOfStock() {
-    return this.getAll().filter(p => p.stock <= 0);
-  },
-  getExpiringSoon(days = 90) {
-    const now = new Date();
-    const limit = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-    return this.getAll().filter(p => {
-      if (!p.batches || p.batches.length === 0) return false;
-      return p.batches.some(b => new Date(b.expiry) <= limit && new Date(b.expiry) >= now);
-    });
-  },
-  addStock(id, qty, batchNo, expiry) {
-    const product = this.getById(id);
-    if (!product) return null;
-    const batches = product.batches || [];
-    batches.push({ id: generateId(), batchNo, expiry, qty, addedAt: new Date().toISOString() });
-    const newStock = (product.stock || 0) + qty;
-    return update(STORE_KEYS.products, id, { stock: newStock, batches });
+supabase.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT') {
+    clearCache();
+    window.dispatchEvent(new Event('apotek:signed-out'));
   }
-};
+});
 
-// ===== Transactions =====
-export const transactions = {
-  getAll: () => getAll(STORE_KEYS.transactions),
-  getById: (id) => getById(STORE_KEYS.transactions, id),
-  add(trx) {
-    // Deduct stock for each item
-    trx.items.forEach(item => {
-      const product = products.getById(item.productId);
-      if (product) {
-        const newStock = Math.max(0, (product.stock || 0) - item.qty);
-        update(STORE_KEYS.products, item.productId, { stock: newStock });
-      }
-    });
-    // Calculate margin
-    trx.totalCost = trx.items.reduce((sum, i) => sum + (i.costPrice * i.qty), 0);
-    trx.margin = trx.total - trx.totalCost;
-    return add(STORE_KEYS.transactions, trx);
-  },
-  getByDateRange(startDate, endDate) {
-    return this.getAll().filter(trx => {
-      const d = trx.createdAt.split('T')[0];
-      return d >= startDate && d <= endDate;
-    });
-  },
-  getToday() {
-    return this.getByDateRange(today(), today());
+export async function initializeData() {
+  // Old business data is left untouched for owner-controlled import. Demo passwords are removed.
+  localStorage.removeItem('dp_users');
+  localStorage.removeItem('dp_auth');
+  const { data } = await supabase.auth.getSession();
+  if (data.session) await auth.refresh();
+}
+
+export async function refreshInventory() {
+  const epoch = authEpoch;
+  const rows = [];
+  for (let offset=0;;offset+=500) {
+    const page = checked(await supabase.from('products').select('*,batches(*)').gt('batches.qty',0).eq('deleted',false).order('id').range(offset,offset+499));
+    rows.push(...page);
+    if (page.length<500) break;
   }
-};
-
-// ===== Stock Log =====
-export const stockLog = {
-  getAll: () => getAll(STORE_KEYS.stockLog),
-  add: (log) => add(STORE_KEYS.stockLog, log),
-};
-
-// ===== Settings =====
-export const settings = {
-  get() {
-    try {
-      return JSON.parse(localStorage.getItem(STORE_KEYS.settings)) || this.defaults();
-    } catch {
-      return this.defaults();
-    }
-  },
-  save(data) {
-    localStorage.setItem(STORE_KEYS.settings, JSON.stringify(data));
-  },
-  defaults() {
-    return {
-      pharmacyName: 'DigiPotek Apotek',
-      address: 'Jl. Kesehatan No. 1, Jakarta',
-      phone: '021-12345678',
-      receiptHeader: 'Terima Kasih',
-      receiptFooter: 'Semoga Lekas Sembuh',
-    };
-  }
-};
-
-// ===== Initialize Seed Data =====
-export function initializeData() {
-  // Seed users if empty
-  if (getAll(STORE_KEYS.users).length === 0) {
-    saveAll(STORE_KEYS.users, [
-      { id: 'user_owner', username: 'owner', password: 'owner123', name: 'Pemilik Apotek', role: 'owner', createdAt: new Date().toISOString() },
-      { id: 'user_kasir', username: 'kasir', password: 'kasir123', name: 'Kasir 1', role: 'kasir', createdAt: new Date().toISOString() },
-    ]);
-  }
-
-  // Seed products if empty
-  if (getAll(STORE_KEYS.products).length === 0) {
-    const prods = seedProducts.map(p => ({
-      ...p,
-      id: generateId(),
-      createdAt: new Date().toISOString(),
-    }));
-    saveAll(STORE_KEYS.products, prods);
-  }
-
-  // Seed settings if empty
-  if (!localStorage.getItem(STORE_KEYS.settings)) {
-    settings.save(settings.defaults());
-  }
-
-  // Seed some sample transactions if empty (for demo dashboard)
-  if (getAll(STORE_KEYS.transactions).length === 0) {
-    const prods = products.getAll();
-    const sampleTrx = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const numTrx = Math.floor(Math.random() * 4) + 2;
-      for (let j = 0; j < numTrx; j++) {
-        const numItems = Math.floor(Math.random() * 3) + 1;
-        const items = [];
-        for (let k = 0; k < numItems; k++) {
-          const prod = prods[Math.floor(Math.random() * prods.length)];
-          const qty = Math.floor(Math.random() * 3) + 1;
-          items.push({
-            productId: prod.id,
-            name: prod.name,
-            qty,
-            price: prod.sellPrice,
-            costPrice: prod.buyPrice,
-            subtotal: prod.sellPrice * qty,
-          });
-        }
-        const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
-        const totalCost = items.reduce((s, i) => s + (i.costPrice * i.qty), 0);
-        const methods = ['tunai', 'qris', 'transfer'];
-        d.setHours(8 + Math.floor(Math.random() * 10), Math.floor(Math.random() * 60));
-        sampleTrx.push({
-          id: generateId(),
-          trxNo: `TRX${d.getFullYear().toString().slice(-2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${String(j+1).padStart(4,'0')}`,
-          items,
-          subtotal,
-          discount: 0,
-          total: subtotal,
-          totalCost,
-          margin: subtotal - totalCost,
-          paymentMethod: methods[Math.floor(Math.random() * methods.length)],
-          amountPaid: subtotal,
-          change: 0,
-          cashier: 'Kasir 1',
-          createdAt: d.toISOString(),
-        });
-      }
-    }
-    saveAll(STORE_KEYS.transactions, sampleTrx);
+  const date = today();
+  const next = rows.map(p=>({
+    id:p.id,name:p.name,category:p.category,unit:p.unit,buyPrice:Number(p.buy_price),sellPrice:Number(p.sell_price),minStock:p.min_stock,
+    stock:p.batches.reduce((s,b)=>s+b.qty,0),
+    availableStock:p.batches.filter(b=>!b.expiry || b.expiry>=date).reduce((s,b)=>s+b.qty,0),
+    batches:p.batches.filter(b=>b.qty>0).map(b=>({id:b.id,batchNo:b.batch_no,expiry:b.expiry,qty:b.qty,addedAt:b.created_at})),
+  }));
+  if(epoch===authEpoch) inventory=next;
+  return next;
+}
+export async function loadSettings() {
+  const row = checked(await supabase.from('settings').select('*').eq('id',true).single());
+  appSettings={pharmacyName:row.pharmacy_name,address:row.address,phone:row.phone,receiptHeader:row.receipt_header,receiptFooter:row.receipt_footer};
+}
+export async function prepareRoute(path) {
+  if (!session?.active) return;
+  await Promise.all([refreshInventory(),loadSettings()]);
+  if (path==='/dashboard') {
+    const d = new Date(); d.setDate(d.getDate()-30);
+    await transactions.loadRange(businessDate(d),today());
   }
 }
+export const products = {
+  getAll:()=>inventory,
+  getById:id=>inventory.find(p=>p.id===id),
+  search(query,category='') { return inventory.filter(p=>(!category||p.category===category)&&(!query||p.name.toLowerCase().includes(query.toLowerCase()))); },
+  getLowStock:()=>inventory.filter(p=>p.stock>0&&p.stock<=p.minStock),
+  getOutOfStock:()=>inventory.filter(p=>p.stock<=0),
+  getExpiringSoon(days=90) { const limit=new Date();limit.setDate(limit.getDate()+days);return inventory.filter(p=>p.batches.some(b=>b.expiry && b.expiry>=today() && b.expiry<=businessDate(limit))); },
+  async add(data) { const id=await rpc('save_product',{product_id:null,payload:data});await refreshInventory();return this.getById(id); },
+  async update(id,data) { await rpc('save_product',{product_id:id,payload:data});await refreshInventory();return this.getById(id); },
+  async remove(id) { await rpc('delete_product',{product_id:id});await refreshInventory(); },
+  async addStock(id,qty,batchNo,expiry) { await rpc('change_stock',{product_id:id,mode:'add',quantity:qty,batch_no:batchNo,expiry:expiry||null,note:'Penerimaan stok'});await refreshInventory(); },
+  async adjust(id,mode,quantity,note) { await rpc('change_stock',{product_id:id,mode,quantity,note});await refreshInventory(); },
+};
+function mapTransaction(t) {
+ return {id:t.id,trxNo:t.trx_no,createdAt:t.created_at,cashier:t.cashier,subtotal:Number(t.subtotal),discount:Number(t.discount),total:Number(t.total),totalCost:Number(t.total_cost),margin:Number(t.margin),paymentMethod:t.payment_method,amountPaid:Number(t.amount_paid),change:Number(t.change),items:(t.sale_items||[]).map(i=>({productId:i.product_id,name:i.name,qty:i.qty,price:Number(i.price),costPrice:Number(i.cost_total)/i.qty,subtotal:Number(i.subtotal)}))};
+}
+export const transactions = {
+ getAll:()=>transactionCache,
+ getById:id=>transactionCache.find(t=>t.id===id),
+ getByDateRange:(from,to)=>transactionCache.filter(t=>{const date=businessDate(t.createdAt);return date>=from&&date<=to;}),
+ getToday() {return this.getByDateRange(today(),today());},
+ async loadRange(from,to) {
+   if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)||from>to) throw new Error('Rentang tanggal tidak valid');
+   if((new Date(to)-new Date(from))/86400000>92) throw new Error('Pilih rentang maksimal 93 hari agar laporan tetap ringan.');
+   const epoch=authEpoch;
+   const rows=[];
+   const start=new Date(`${from}T00:00:00+07:00`).toISOString();
+   const end=new Date(new Date(`${to}T00:00:00+07:00`).getTime()+86400000).toISOString();
+   for(let offset=0;;offset+=500) {
+     const page=checked(await supabase.from('sales').select('*,sale_items(*)').gte('created_at',start).lt('created_at',end).order('created_at').order('id').range(offset,offset+499));
+     rows.push(...page);if(page.length<500)break;
+   }
+   const next=rows.map(mapTransaction);
+   if(epoch===authEpoch)transactionCache=next;
+   return next;
+ },
+ async add(trx) {
+   let id;
+   try { id=await rpc('checkout',{request_id:trx.requestId,items:trx.items.map(i=>({productId:i.productId,qty:i.qty,price:i.price})),discount_type:trx.discountType,discount_value:trx.discountValue,payment_method:trx.paymentMethod,amount_paid:Math.round(trx.amountPaid)}); } catch(error) {
+     error.rejected = error.code==='P0001' || error.code==='42501' || /^22|^23/.test(error.code||'');
+     throw error;
+   }
+   const result=checked(await supabase.from('sales').select('*,sale_items(*)').eq('id',id).single());
+   const saved=mapTransaction(result);
+   // Receipt retrieval may fail after commit. Reusing requestId makes retries safe.
+   transactionCache=transactionCache.filter(t=>t.id!==id).concat(saved);
+   return saved;
+ },
+};
+export const settings={ get:()=>appSettings||{pharmacyName:'Apotek Mulia Farma',address:'',phone:'',receiptHeader:'Terima Kasih',receiptFooter:'Semoga Lekas Sembuh'} };
+export const staff={
+ async list(){return checked(await supabase.from('staff').select('*').order('created_at'));},
+ async setActive(id,enabled){await rpc('manage_staff',{staff_id:id,enabled});},
+};
+export async function importLegacy(data) {return rpc('import_legacy',{payload:data});}

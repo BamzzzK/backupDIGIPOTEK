@@ -1,13 +1,16 @@
+import { showToast } from '../components/toast.js';
 // ===== DigiPotek Reports Page =====
 import { renderSidebar } from '../components/sidebar.js';
 import { renderHeader, bindHeaderEvents } from '../components/header.js';
 import { showModal } from '../components/modal.js';
 import { transactions } from '../store.js';
-import { formatRupiah, formatDateTime, today, daysAgo, escapeHtml } from '../utils.js';
+import { businessDate, formatRupiah, formatDateTime, today, daysAgo, escapeHtml } from '../utils.js';
 
 let dateFrom = daysAgo(7);
 let dateTo = today();
 let activePreset = '7d';
+let reportRequest=0;
+let displayedTransactions=[];
 
 export function renderReports() {
   dateFrom = daysAgo(7);
@@ -82,15 +85,19 @@ export function renderReports() {
   updateReport();
   bindReportEvents();
 
-  return {};
+  return { destroy() { reportRequest++; for(const id of ['report-chart','payment-chart']) {const canvas=document.getElementById(id);if(canvas)Chart.getChart(canvas)?.destroy();} } };
 }
 
-function updateReport() {
-  const trxs = transactions.getByDateRange(dateFrom, dateTo);
-  renderStats(trxs);
-  renderChart(trxs);
-  renderPaymentChart(trxs);
-  renderTable(trxs);
+async function updateReport() {
+  const ticket=++reportRequest;
+  const button=document.getElementById('btn-export-csv');button.disabled=true;
+  try {
+    const trxs = await transactions.loadRange(dateFrom, dateTo);
+    if(ticket!==reportRequest || !document.getElementById('report-stats'))return;
+    displayedTransactions=trxs;
+    renderStats(trxs);renderChart(trxs);renderPaymentChart(trxs);renderTable(trxs);
+    button.disabled=false;
+  } catch(e){if(ticket===reportRequest)showToast(e.message,'error',7000);}
 }
 
 function renderStats(trxs) {
@@ -148,7 +155,7 @@ function renderChart(trxs) {
   }
 
   trxs.forEach(t => {
-    const key = t.createdAt.split('T')[0];
+    const key = businessDate(t.createdAt);
     if (dailyData[key]) {
       dailyData[key].sales += t.total;
       dailyData[key].margin += (t.margin || 0);
@@ -276,7 +283,7 @@ function renderTable(trxs) {
             t.paymentMethod === 'qris' ? 'badge-info' : 'badge-default';
           return `
             <tr>
-              <td><strong>${t.trxNo}</strong></td>
+              <td><strong>${escapeHtml(t.trxNo)}</strong></td>
               <td>${formatDateTime(t.createdAt)}</td>
               <td>${t.items.length} item</td>
               <td><strong>${formatRupiah(t.total)}</strong></td>
@@ -303,7 +310,7 @@ function renderTable(trxs) {
       const trx = transactions.getById(btn.dataset.id);
       if (!trx) return;
       showModal({
-        title: `Transaksi ${trx.trxNo}`,
+        title: `Transaksi ${escapeHtml(trx.trxNo)}`,
         size: 'lg',
         content: `
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
@@ -360,7 +367,7 @@ function exportCSV(trxs) {
     ]);
   });
 
-  const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/^[=+@-]/, "'" + String(c)[0]).replaceAll('"', '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -405,7 +412,7 @@ function bindReportEvents() {
 
   // Export
   document.getElementById('btn-export-csv').addEventListener('click', () => {
-    const trxs = transactions.getByDateRange(dateFrom, dateTo);
-    exportCSV(trxs);
+    exportCSV(displayedTransactions);
   });
 }
+

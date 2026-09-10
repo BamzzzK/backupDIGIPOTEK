@@ -23,7 +23,7 @@ export function formatDateTime(dateStr) {
 
 /** Get today's date string (YYYY-MM-DD) */
 export function today() {
-  return new Date().toISOString().split('T')[0];
+  return businessDate(new Date());
 }
 
 /** Generate unique ID */
@@ -62,15 +62,12 @@ export function daysBetween(date1, date2) {
 export function daysAgo(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().split('T')[0];
+  return businessDate(d);
 }
 
 /** Escape HTML to prevent XSS */
 export function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+  return String(str ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 }
 
 /** Get category badge HTML */
@@ -95,4 +92,18 @@ export function stockBadge(stock, minStock) {
 export function parseNum(val) {
   if (!val) return 0;
   return Number(String(val).replace(/[^0-9.-]/g, '')) || 0;
+}
+
+
+export function businessDate(value) {
+  const parts = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(value));
+  const values = Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+export async function runAction(button, action) {
+  if (button.disabled) return;
+  button.disabled = true;
+  try { return await action(); }
+  catch(error) { const {showToast} = await import('./components/toast.js'); showToast(error.message, 'error', 7000); }
+  finally { if(button.isConnected) button.disabled = false; }
 }

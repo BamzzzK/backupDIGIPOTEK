@@ -1,3 +1,4 @@
+import { escapeHtml } from '../utils.js';
 // ===== DigiPotek Sidebar =====
 import { auth } from '../store.js';
 import { getCurrentRoute, navigate } from '../router.js';
@@ -13,11 +14,12 @@ export function renderSidebar() {
     { section: 'MENU UTAMA' },
     ...(isOwner ? [{ path: '/dashboard', icon: 'layout-dashboard', label: 'Dashboard' }] : []),
     { path: '/pos', icon: 'shopping-cart', label: 'Kasir (POS)' },
-    { section: 'INVENTORI' },
+    ...(isOwner ? [{ section: 'INVENTORI' },
     { path: '/products', icon: 'package', label: 'Produk' },
-    { path: '/stock', icon: 'boxes', label: 'Manajemen Stok' },
+    { path: '/stock', icon: 'boxes', label: 'Manajemen Stok' }] : []),
     ...(isOwner ? [
       { section: 'LAPORAN' },
+      { path: '/staff', icon: 'users', label: 'Pegawai & Data' },
       { path: '/reports', icon: 'bar-chart-3', label: 'Laporan & Margin' },
     ] : []),
   ];
@@ -54,9 +56,9 @@ export function renderSidebar() {
       </nav>
       <div class="sidebar-footer">
         <div class="sidebar-user" id="sidebar-user-btn">
-          <div class="sidebar-avatar">${initials}</div>
+          <div class="sidebar-avatar">${escapeHtml(initials)}</div>
           <div class="sidebar-user-info">
-            <div class="sidebar-user-name">${session.name}</div>
+            <div class="sidebar-user-name">${escapeHtml(session.name)}</div>
             <div class="sidebar-user-role">${roleBadge}</div>
           </div>
         </div>
@@ -64,3 +66,4 @@ export function renderSidebar() {
     </aside>
   `;
 }
+

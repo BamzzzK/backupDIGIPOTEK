@@ -2,7 +2,7 @@
 import { renderSidebar } from '../components/sidebar.js';
 import { renderHeader, bindHeaderEvents } from '../components/header.js';
 import { transactions, products } from '../store.js';
-import { formatRupiah, daysAgo, today } from '../utils.js';
+import { businessDate, escapeHtml, formatRupiah, daysAgo, today } from '../utils.js';
 
 export function renderDashboard() {
   const app = document.getElementById('app');
@@ -92,7 +92,7 @@ export function renderDashboard() {
                       ${topProducts.length === 0 ? '<tr><td colspan="3" style="text-align:center;color:var(--text-light);padding:20px">Belum ada data</td></tr>' :
                         topProducts.map((p, i) => `
                           <tr>
-                            <td><strong>${i+1}. ${p.name}</strong></td>
+                            <td><strong>${i+1}. ${escapeHtml(p.name)}</strong></td>
                             <td>${p.qty}</td>
                             <td>${formatRupiah(p.revenue)}</td>
                           </tr>
@@ -119,7 +119,7 @@ export function renderDashboard() {
                   <tbody>
                     ${lowStockProducts.map(p => `
                       <tr>
-                        <td><strong>${p.name}</strong></td>
+                        <td><strong>${escapeHtml(p.name)}</strong></td>
                         <td>${p.category === 'obat' ? '💊 Obat' : p.category === 'non-obat' ? '🧴 Non-Obat' : '🩺 Alkes'}</td>
                         <td><span class="badge badge-warning">${p.stock}</span></td>
                         <td>${p.minStock}</td>
@@ -140,7 +140,7 @@ export function renderDashboard() {
   bindHeaderEvents();
   renderSalesChart();
 
-  return {};
+  return { destroy() { const c=document.getElementById('sales-chart'); if(c) Chart.getChart(c)?.destroy(); } };
 }
 
 function renderSalesChart() {
@@ -154,7 +154,7 @@ function renderSalesChart() {
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = businessDate(d);
     labels.push(d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }));
     
     const dayTrx = transactions.getByDateRange(dateStr, dateStr);
@@ -207,3 +207,4 @@ function renderSalesChart() {
     }
   });
 }
+

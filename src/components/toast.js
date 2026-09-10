@@ -1,3 +1,4 @@
+import { escapeHtml } from '../utils.js';
 // ===== DigiPotek Toast Notifications =====
 
 export function showToast(message, type = 'success', duration = 3000) {
@@ -11,7 +12,7 @@ export function showToast(message, type = 'success', duration = 3000) {
 
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
-  toast.innerHTML = `<i data-lucide="${iconMap[type] || 'info'}"></i><span>${message}</span>`;
+  toast.innerHTML = `<i data-lucide="${iconMap[type] || 'info'}"></i><span>${escapeHtml(message)}</span>`;
   container.appendChild(toast);
 
   // Initialize lucide icons
@@ -22,3 +23,4 @@ export function showToast(message, type = 'success', duration = 3000) {
     setTimeout(() => toast.remove(), 300);
   }, duration);
 }
+

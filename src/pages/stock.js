@@ -4,7 +4,7 @@ import { renderHeader, bindHeaderEvents } from '../components/header.js';
 import { showToast } from '../components/toast.js';
 import { showModal, closeModal } from '../components/modal.js';
 import { products } from '../store.js';
-import { formatRupiah, escapeHtml, categoryBadge, stockBadge, formatDate, daysBetween, today, debounce } from '../utils.js';
+import { runAction, formatRupiah, escapeHtml, categoryBadge, stockBadge, formatDate, daysBetween, today, debounce } from '../utils.js';
 
 let categoryFilter = '';
 let statusFilter = '';
@@ -157,7 +157,7 @@ function renderStockTable() {
             <td>${categoryBadge(p.category)}</td>
             <td><strong style="font-size:1.05rem">${p.stock}</strong></td>
             <td>${p.minStock}</td>
-            <td>${p.unit}</td>
+            <td>${escapeHtml(p.unit)}</td>
             <td>${stockBadge(p.stock, p.minStock)}</td>
             <td>
               ${batches.length > 0 ? `
@@ -202,7 +202,7 @@ function showBatchDetail(productId) {
     <div style="margin-bottom:16px;padding:12px;background:var(--bg-alt);border-radius:var(--radius)">
       <strong>${escapeHtml(product.name)}</strong> — 
       ${categoryBadge(product.category)}
-      <div style="margin-top:4px;font-size:0.85rem;color:var(--text-muted)">Total Stok: <strong>${product.stock} ${product.unit}</strong></div>
+      <div style="margin-top:4px;font-size:0.85rem;color:var(--text-muted)">Total Stok: <strong>${product.stock} ${escapeHtml(product.unit)}</strong></div>
     </div>
     ${batches.length === 0 ? `
       <div class="empty-state" style="padding:20px">
@@ -226,8 +226,8 @@ function showBatchDetail(productId) {
               }
               return `
                 <tr>
-                  <td><strong>${b.batchNo || '-'}</strong></td>
-                  <td>${b.qty} ${product.unit}</td>
+                  <td><strong>${escapeHtml(b.batchNo || '-')}</strong></td>
+                  <td>${b.qty} ${escapeHtml(product.unit)}</td>
                   <td>${b.expiry ? formatDate(b.expiry) : '-'}</td>
                   <td>${statusBadge}</td>
                 </tr>
@@ -249,13 +249,12 @@ function showAdjustStock(productId) {
   const content = `
     <div style="margin-bottom:16px;padding:12px;background:var(--bg-alt);border-radius:var(--radius)">
       <strong>${escapeHtml(product.name)}</strong><br>
-      <span style="font-size:0.85rem;color:var(--text-muted)">Stok saat ini: <strong>${product.stock} ${product.unit}</strong></span>
+      <span style="font-size:0.85rem;color:var(--text-muted)">Stok saat ini: <strong>${product.stock} ${escapeHtml(product.unit)}</strong></span>
     </div>
     <form id="adjust-form">
       <div class="form-group">
         <label for="adj-type">Tipe Adjustment</label>
         <select class="form-select" id="adj-type">
-          <option value="set">Set Stok (Stok Opname)</option>
           <option value="add">Tambah Stok</option>
           <option value="subtract">Kurangi Stok</option>
         </select>
@@ -281,7 +280,8 @@ function showAdjustStock(productId) {
 
   showModal({ title: 'Adjustment Stok', content, footer });
 
-  document.getElementById('btn-save-adjust').addEventListener('click', () => {
+  document.getElementById('btn-save-adjust').addEventListener('click', (e) => runAction(e.currentTarget, async () => {
+    if(!document.getElementById('adjust-form').reportValidity())return;
     const type = document.getElementById('adj-type').value;
     const qty = parseInt(document.getElementById('adj-qty').value) || 0;
 
@@ -290,16 +290,13 @@ function showAdjustStock(productId) {
       return;
     }
 
-    let newStock;
-    if (type === 'set') newStock = qty;
-    else if (type === 'add') newStock = product.stock + qty;
-    else newStock = Math.max(0, product.stock - qty);
-
-    products.update(productId, { stock: newStock });
+    const note = document.getElementById('adj-note').value.trim();
+    await products.adjust(productId, type, qty, note || 'Adjustment stok');
+    const newStock = products.getById(productId).stock;
     closeModal();
     renderStock();
-    showToast(`Stok ${product.name} diperbarui menjadi ${newStock} ${product.unit}`, 'success');
-  });
+    showToast(`Stok ${product.name} diperbarui menjadi ${newStock} ${escapeHtml(product.unit)}`, 'success');
+  }));
 }
 
 function bindStockEvents() {
@@ -331,3 +328,4 @@ function bindStockEvents() {
     renderStockTable();
   });
 }
+

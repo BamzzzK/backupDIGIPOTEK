@@ -1,3 +1,4 @@
+import { runAction } from '../utils.js';
 // ===== DigiPotek Header =====
 import { auth } from '../store.js';
 import { navigate } from '../router.js';
@@ -34,9 +35,10 @@ export function renderHeader(title, subtitle = '') {
 export function bindHeaderEvents() {
   const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
-      auth.logout();
+    logoutBtn.addEventListener('click', () => runAction(logoutBtn, async () => {
+      await auth.logout();
       navigate('/login');
-    });
+    }));
   }
 }
+

@@ -4,7 +4,7 @@ import { renderHeader, bindHeaderEvents } from '../components/header.js';
 import { showToast } from '../components/toast.js';
 import { showModal, closeModal } from '../components/modal.js';
 import { products } from '../store.js';
-import { formatRupiah, escapeHtml, categoryBadge, stockBadge, debounce, generateId } from '../utils.js';
+import { runAction, formatRupiah, escapeHtml, categoryBadge, stockBadge, debounce, generateId } from '../utils.js';
 
 let searchQuery = '';
 let categoryFilter = '';
@@ -91,7 +91,7 @@ function renderProductsTable() {
           <tr>
             <td><strong>${escapeHtml(p.name)}</strong></td>
             <td>${categoryBadge(p.category)}</td>
-            <td>${p.unit}</td>
+            <td>${escapeHtml(p.unit)}</td>
             <td>${formatRupiah(p.buyPrice)}</td>
             <td>${formatRupiah(p.sellPrice)}</td>
             <td><strong>${p.stock}</strong></td>
@@ -176,7 +176,7 @@ function showProductForm(editId = null) {
         </div>
         <div class="form-group">
           <label for="pf-unit">Satuan *</label>
-          <input type="text" class="form-input" id="pf-unit" value="${product ? product.unit : ''}" placeholder="strip, botol, box, pcs" required />
+          <input type="text" class="form-input" id="pf-unit" value="${product ? escapeHtml(product.unit) : ''}" placeholder="strip, botol, box, pcs" required />
         </div>
       </div>
       <div class="form-row">
@@ -192,7 +192,7 @@ function showProductForm(editId = null) {
       <div class="form-row">
         <div class="form-group">
           <label for="pf-stock">Stok ${product ? 'Saat Ini' : 'Awal'}</label>
-          <input type="number" class="form-input" id="pf-stock" value="${product ? product.stock : 0}" min="0" />
+          <input type="number" class="form-input" id="pf-stock" ${product ? 'disabled title="Ubah stok melalui menu Manajemen Stok"' : ''} value="${product ? product.stock : 0}" min="0" />
         </div>
         <div class="form-group">
           <label for="pf-minStock">Stok Minimum</label>
@@ -212,14 +212,15 @@ function showProductForm(editId = null) {
 
   showModal({ title, content, footer });
 
-  document.getElementById('btn-save-product').addEventListener('click', () => {
+  document.getElementById('btn-save-product').addEventListener('click', (e) => runAction(e.currentTarget, async () => {
+    if(!document.getElementById('product-form').reportValidity())return;
     const name = document.getElementById('pf-name').value.trim();
     const category = document.getElementById('pf-category').value;
     const unit = document.getElementById('pf-unit').value.trim();
     const buyPrice = parseInt(document.getElementById('pf-buyPrice').value) || 0;
     const sellPrice = parseInt(document.getElementById('pf-sellPrice').value) || 0;
     const stock = parseInt(document.getElementById('pf-stock').value) || 0;
-    const minStock = parseInt(document.getElementById('pf-minStock').value) || 5;
+    const minStock = Number(document.getElementById('pf-minStock').value);
 
     if (!name || !unit || buyPrice <= 0 || sellPrice <= 0) {
       showToast('Mohon lengkapi semua field yang wajib!', 'error');
@@ -233,17 +234,17 @@ function showProductForm(editId = null) {
     const data = { name, category, unit, buyPrice, sellPrice, stock, minStock };
 
     if (product) {
-      products.update(editId, data);
+      await products.update(editId, data);
       showToast('Produk berhasil diperbarui!', 'success');
     } else {
       data.batches = [];
-      products.add(data);
+      await products.add(data);
       showToast('Produk berhasil ditambahkan!', 'success');
     }
 
     closeModal();
     renderProductsTable();
-  });
+  }));
 }
 
 function showAddStockModal(productId) {
@@ -283,7 +284,7 @@ function showAddStockModal(productId) {
 
   showModal({ title: 'Tambah Stok', content, footer });
 
-  document.getElementById('btn-save-stock').addEventListener('click', () => {
+  document.getElementById('btn-save-stock').addEventListener('click', (e) => runAction(e.currentTarget, async () => {
     const qty = parseInt(document.getElementById('as-qty').value) || 0;
     const batchNo = document.getElementById('as-batch').value.trim();
     const expiry = document.getElementById('as-expiry').value;
@@ -293,11 +294,11 @@ function showAddStockModal(productId) {
       return;
     }
 
-    products.addStock(productId, qty, batchNo || '-', expiry || '');
+    await products.addStock(productId, qty, batchNo || '-', expiry || '');
     closeModal();
     renderProductsTable();
     showToast(`Stok ${product.name} bertambah ${qty} ${product.unit}`, 'success');
-  });
+  }));
 }
 
 function deleteProduct(id) {
@@ -322,12 +323,12 @@ function deleteProduct(id) {
 
   showModal({ title: 'Konfirmasi Hapus', content, footer });
 
-  document.getElementById('btn-confirm-delete').addEventListener('click', () => {
-    products.remove(id);
+  document.getElementById('btn-confirm-delete').addEventListener('click', (e) => runAction(e.currentTarget, async () => {
+    await products.remove(id);
     closeModal();
     renderProductsTable();
     showToast('Produk berhasil dihapus', 'success');
-  });
+  }));
 }
 
 function bindProductsEvents() {
@@ -354,3 +355,4 @@ function bindProductsEvents() {
   // Add product button
   document.getElementById('btn-add-product').addEventListener('click', () => showProductForm());
 }
+

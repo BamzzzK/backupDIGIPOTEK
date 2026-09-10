@@ -3,10 +3,13 @@ import { renderSidebar } from '../components/sidebar.js';
 import { renderHeader, bindHeaderEvents } from '../components/header.js';
 import { showToast } from '../components/toast.js';
 import { showModal, closeModal } from '../components/modal.js';
-import { products, transactions, settings, auth } from '../store.js';
-import { formatRupiah, generateTrxNo, escapeHtml, debounce, categoryBadge } from '../utils.js';
+import { products, transactions, settings, auth, refreshInventory } from '../store.js';
+import { runAction, formatRupiah, generateTrxNo, escapeHtml, debounce, categoryBadge } from '../utils.js';
 
 let cart = [];
+let paymentBusy=false;
+let activePOS=0;
+const pendingKey=()=>`apotek_pending_checkout:${auth.getSession()?.id}`;
 let searchQuery = '';
 let categoryFilter = '';
 let paymentMethod = 'tunai';
@@ -14,6 +17,7 @@ let discountValue = 0;
 let discountType = 'nominal'; // 'nominal' or 'persen'
 
 export function renderPOS() {
+  const page=++activePOS;
   cart = [];
   searchQuery = '';
   categoryFilter = '';
@@ -56,8 +60,18 @@ export function renderPOS() {
   renderProductGrid();
   renderCart();
   bindPOSEvents();
+  const pending=JSON.parse(sessionStorage.getItem(pendingKey())||'null');
+  if(pending)showPendingCheckout(pending);
 
-  return {};
+  let refreshing=false;
+  const timer=setInterval(async()=>{
+    if(refreshing||document.hidden||page!==activePOS||paymentBusy)return;
+    refreshing=true;
+    try { await refreshInventory();if(page===activePOS&&document.getElementById('pos-products-grid'))renderProductGrid(); }
+    catch { /* Payment still validates against the database; do not overwrite the cart on a refresh error. */ }
+    finally { refreshing=false; }
+  },30000);
+  return {destroy(){activePOS++;clearInterval(timer);}};
 }
 
 function renderProductGrid() {
@@ -77,12 +91,12 @@ function renderProductGrid() {
   }
 
   grid.innerHTML = prods.map(p => `
-    <div class="pos-product-card ${p.stock <= 0 ? 'out-of-stock' : ''}" data-id="${p.id}">
+    <div class="pos-product-card ${p.availableStock <= 0 ? 'out-of-stock' : ''}" data-id="${p.id}">
       <div class="pos-product-name">${escapeHtml(p.name)}</div>
       <div class="pos-product-category">${categoryBadge(p.category)}</div>
       <div class="pos-product-meta">
         <span class="pos-product-price">${formatRupiah(p.sellPrice)}</span>
-        <span class="pos-product-stock">Stok: ${p.stock} ${p.unit}</span>
+        <span class="pos-product-stock">Layak jual: ${p.availableStock} ${escapeHtml(p.unit)}</span>
       </div>
     </div>
   `).join('');
@@ -95,11 +109,11 @@ function renderProductGrid() {
 
 function addToCart(productId) {
   const product = products.getById(productId);
-  if (!product || product.stock <= 0) return;
+  if (!product || product.availableStock <= 0) return;
 
   const existing = cart.find(item => item.productId === productId);
   if (existing) {
-    if (existing.qty >= product.stock) {
+    if (existing.qty >= product.availableStock) {
       showToast('Stok tidak cukup!', 'warning');
       return;
     }
@@ -114,7 +128,7 @@ function addToCart(productId) {
       unit: product.unit,
       qty: 1,
       subtotal: product.sellPrice,
-      maxStock: product.stock,
+      maxStock: product.availableStock,
     });
   }
 
@@ -134,7 +148,7 @@ function updateCartQty(index, delta) {
     removeFromCart(index);
     return;
   }
-  if (newQty > item.maxStock) {
+  if (newQty > (products.getById(item.productId)?.availableStock ?? 0)) {
     showToast('Stok tidak cukup!', 'warning');
     return;
   }
@@ -179,7 +193,7 @@ function renderCart() {
         <div class="cart-item">
           <div class="cart-item-info">
             <div class="cart-item-name">${escapeHtml(item.name)}</div>
-            <div class="cart-item-price">${formatRupiah(item.price)} / ${item.unit}</div>
+            <div class="cart-item-price">${formatRupiah(item.price)} / ${escapeHtml(item.unit)}</div>
           </div>
           <div class="cart-item-qty">
             <button data-action="minus" data-index="${i}"><i data-lucide="minus"></i></button>
@@ -264,13 +278,16 @@ function bindCartEvents() {
   const discountTypeSelect = document.getElementById('discount-type');
   if (discountInput) {
     discountInput.addEventListener('input', () => {
-      discountValue = parseFloat(discountInput.value) || 0;
+      const value = parseFloat(discountInput.value) || 0;
+      discountValue = Math.max(0, discountType === 'persen' ? Math.min(100, value) : Math.min(getCartTotals().subtotal, value));
       renderCart();
+      const next = document.getElementById('discount-input'); next?.focus();
     });
   }
   if (discountTypeSelect) {
     discountTypeSelect.addEventListener('change', () => {
       discountType = discountTypeSelect.value;
+      discountValue = Math.min(discountValue, discountType === 'persen' ? 100 : getCartTotals().subtotal);
       renderCart();
     });
   }
@@ -292,7 +309,18 @@ function bindCartEvents() {
 
 function showPaymentModal() {
   if (cart.length === 0) return;
+  const page=activePOS;
+  const checkoutStorageKey=pendingKey();
   const { subtotal, discount, total } = getCartTotals();
+  // Keep the same command ID after an ambiguous network failure, including a page reload.
+  const fingerprint=JSON.stringify({user:auth.getSession()?.id,items:cart.map(i=>({productId:i.productId,qty:i.qty,price:i.price})),discountType,discountValue,paymentMethod});
+  const previous=JSON.parse(sessionStorage.getItem(checkoutStorageKey)||'null');
+  if(previous && previous.fingerprint!==fingerprint){
+    showToast('Ada pembayaran yang belum terkonfirmasi. Periksa transaksi tertunda sebelum membuat pembayaran baru.', 'warning',7000);
+    showPendingCheckout(previous);
+    return;
+  }
+  const requestId=previous?.requestId || crypto.randomUUID();
 
   const content = `
     <div style="text-align:center;margin-bottom:20px;">
@@ -345,7 +373,8 @@ function showPaymentModal() {
     payAmountInput.focus();
   }
 
-  document.getElementById('btn-confirm-pay').addEventListener('click', () => {
+  document.getElementById('btn-confirm-pay').addEventListener('click', (event) => runAction(event.currentTarget, async () => {
+    if(page!==activePOS) return;
     let amountPaid = total;
     let change = 0;
 
@@ -361,7 +390,7 @@ function showPaymentModal() {
     // Save transaction
     const session = auth.getSession();
     const trx = {
-      trxNo: generateTrxNo(),
+      requestId, discountType, discountValue,
       items: cart.map(item => ({
         productId: item.productId,
         name: item.name,
@@ -379,14 +408,21 @@ function showPaymentModal() {
       cashier: session?.name || 'Unknown',
     };
 
-    transactions.add(trx);
-    closeModal();
-    showReceipt(trx);
-    cart = [];
-    renderCart();
-    renderProductGrid(); // Refresh stock display
-    showToast('Transaksi berhasil!', 'success');
-  });
+    const pending=previous || {requestId,fingerprint,trx};
+    sessionStorage.setItem(checkoutStorageKey,JSON.stringify(pending));
+    paymentBusy=true;
+    try {
+      const saved=await transactions.add(pending.trx);
+      sessionStorage.removeItem(checkoutStorageKey);
+      if(page!==activePOS)return;
+      cart=[];discountValue=0;renderCart();closeModal();showReceipt(saved);
+      showToast('Transaksi tersimpan!', 'success');
+      try { await refreshInventory();if(page===activePOS)renderProductGrid(); } catch { showToast('Penjualan tersimpan; tampilan stok belum diperbarui.','warning'); }
+    } catch(error) {
+      if(error.rejected) { sessionStorage.removeItem(checkoutStorageKey);closeModal();showToast(error.message,'error',8000);return; }
+      showToast('Pembayaran belum terkonfirmasi: '+error.message+'. Coba konfirmasi lagi dengan transaksi yang sama.', 'error',10000);
+    } finally { paymentBusy=false; }
+  }));
 }
 
 function showReceipt(trx) {
@@ -394,19 +430,19 @@ function showReceipt(trx) {
   const content = `
     <div class="receipt-preview" id="receipt-content">
       <div class="receipt-header">
-        <h3>${s.pharmacyName}</h3>
-        <div>${s.address}</div>
-        <div>Telp: ${s.phone}</div>
+        <h3>${escapeHtml(s.pharmacyName)}</h3>
+        <div>${escapeHtml(s.address)}</div>
+        <div>Telp: ${escapeHtml(s.phone)}</div>
       </div>
       <div class="receipt-divider"></div>
       <div style="display:flex;justify-content:space-between;font-size:11px">
-        <span>No: ${trx.trxNo}</span>
-        <span>${new Date(trx.createdAt).toLocaleDateString('id-ID')}</span>
+        <span>No: ${escapeHtml(trx.trxNo)}</span>
+        <span>${new Date(trx.createdAt).toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta'})}</span>
       </div>
-      <div style="font-size:11px">Kasir: ${trx.cashier}</div>
+      <div style="font-size:11px">Kasir: ${escapeHtml(trx.cashier)}</div>
       <div class="receipt-divider"></div>
       ${trx.items.map(item => `
-        <div>${item.name}</div>
+        <div>${escapeHtml(item.name)}</div>
         <div class="receipt-item">
           <span>${item.qty} x ${formatRupiah(item.price)}</span>
           <span>${formatRupiah(item.subtotal)}</span>
@@ -421,8 +457,8 @@ function showReceipt(trx) {
       ${trx.change > 0 ? `<div class="receipt-item"><span>Kembali</span><span>${formatRupiah(trx.change)}</span></div>` : ''}
       <div class="receipt-divider"></div>
       <div style="text-align:center;font-size:11px;margin-top:8px">
-        <div>${s.receiptHeader}</div>
-        <div>${s.receiptFooter}</div>
+        <div>${escapeHtml(s.receiptHeader)}</div>
+        <div>${escapeHtml(s.receiptFooter)}</div>
       </div>
     </div>
   `;
@@ -439,6 +475,7 @@ function showReceipt(trx) {
 
   document.getElementById('btn-print-receipt').addEventListener('click', () => {
     const printWindow = window.open('', '_blank', 'width=350,height=600');
+    if(!printWindow){showToast('Izinkan pop-up untuk mencetak struk.','warning');return;}
     printWindow.document.write(`
       <html><head><title>Struk</title>
       <style>
@@ -476,5 +513,20 @@ function bindPOSEvents() {
     tab.classList.add('active');
     categoryFilter = tab.dataset.cat;
     renderProductGrid();
+  });
+}
+
+
+function showPendingCheckout(pending){
+  showModal({title:'Periksa pembayaran tertunda',content:'<p>Periksa apakah pembayaran sebelumnya sudah tersimpan. Jangan mengulang penjualan dengan nomor baru sebelum statusnya jelas.</p>',footer:'<button class="btn btn-primary" id="retry-pending">Konfirmasi ulang transaksi yang sama</button>'});
+  document.getElementById('retry-pending').onclick=e=>runAction(e.currentTarget,async()=>{
+    let saved;
+    try { saved=await transactions.add(pending.trx); } catch(error) { if(error.rejected) {sessionStorage.removeItem(pendingKey());closeModal();} throw error; }
+    sessionStorage.removeItem(pendingKey());
+    cart=[];discountValue=0;
+    if(document.getElementById('pos-cart'))renderCart();
+    showReceipt(saved);
+    await refreshInventory();
+    if(document.getElementById('pos-products-grid'))renderProductGrid();
   });
 }
