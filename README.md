@@ -64,9 +64,27 @@ setTimeout(() => URL.revokeObjectURL(url), 1000);
 
 ## Deploy gratis ke Cloudflare Pages
 
-Hubungkan repository GitHub, gunakan build command `npm run build`, output directory `dist`, dan Node.js 24. Paket Free cukup untuk menyajikan frontend ini. Functions Cloudflare tidak diperlukan untuk arsitektur ini.
+Di Cloudflare Dashboard, buka **Workers & Pages > Create application > Pages > Import an existing Git repository**, lalu hubungkan GitHub dan pilih `BamzzzK/apotekmuliafarma`.
 
-Setelah memperoleh URL website, atur **Site URL** dan redirect URL yang tepat di Supabase Authentication > URL Configuration. Pilih hostname yang tetap agar sesi dan jalur impor browser tidak membingungkan pengguna.
+Gunakan pengaturan berikut:
+
+| Pengaturan | Nilai |
+| --- | --- |
+| Project name | `apotekmuliafarma` jika masih tersedia |
+| Production branch | `main` |
+| Framework preset | `Vite` |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Root directory | Kosongkan (root repository) |
+| Node.js | `24`, otomatis melalui `.node-version` |
+
+Klik **Save and Deploy**. Cloudflare akan menampilkan URL `*.pages.dev` setelah build dan publikasi berhasil. Integrasi Git akan membangun ulang aplikasi saat perubahan masuk ke `main`. Paket Free cukup untuk menyajikan frontend ini; Functions Cloudflare tidak diperlukan. Konfigurasi Supabase publik sudah disertakan sehingga tidak perlu menambahkan secret database pada Cloudflare.
+
+Setelah memperoleh URL website, buka proyek Supabase `zdrxokjfukumkledmrzh`, lalu **Authentication > URL Configuration**. Isi **Site URL** dengan URL produksi HTTPS yang sebenarnya dan tambahkan URL tersebut ke **Redirect URLs**. Jangan memakai nama domain perkiraan sebelum Cloudflare mengonfirmasi URL-nya. Pilih hostname yang tetap agar sesi dan jalur impor browser tidak membingungkan pengguna.
+
+Terakhir, buka URL produksi, daftar/masuk dan ikuti aktivasi pemilik di atas. Periksa bahwa tautan konfirmasi email kembali ke URL produksi. Proses build lokal yang berhasil belum berarti website sudah dipublikasikan.
+
+Referensi: [panduan Vite Cloudflare Pages](https://developers.cloudflare.com/pages/framework-guides/deploy-a-vite3-project/) dan [pemilihan versi Node.js](https://developers.cloudflare.com/pages/configuration/build-image/).
 
 ## Pengujian
 
