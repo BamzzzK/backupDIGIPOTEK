@@ -9,6 +9,13 @@ let authEpoch = 0;
 function checked(result) { if (result.error) throw Object.assign(new Error(result.error.message), {code:result.error.code}); return result.data; }
 async function rpc(name, args) { return checked(await supabase.rpc(name, args)); }
 function clearCache() { session = null; inventory = []; transactionCache = []; appSettings = null; authEpoch++; }
+function normalizeUsername(value) {
+  const username = String(value || '').trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) {
+    throw new Error('Username harus 3-32 karakter dan hanya boleh berisi huruf, angka, titik, garis bawah, atau tanda hubung.');
+  }
+  return username;
+}
 
 export const auth = {
   getSession: () => session,
@@ -18,15 +25,23 @@ export const auth = {
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user) { clearCache(); return null; }
     const profile = checked(await supabase.from('staff').select('*').eq('id',data.user.id).single());
-    session = { ...profile, email:data.user.email };
+    session = { ...profile };
     return session;
   },
-  async login(email,password) {
-    checked(await supabase.auth.signInWithPassword({email,password}));
+  async login(username,password) {
+    const normalized = normalizeUsername(username);
+    const {data,error} = await supabase.functions.invoke('username-login',{body:{username:normalized,password}});
+    if (error || !data?.access_token || !data?.refresh_token) throw new Error('Username atau password salah.');
+    checked(await supabase.auth.setSession({access_token:data.access_token,refresh_token:data.refresh_token}));
     return this.refresh();
   },
-  async register(email,password,name) {
-    return checked(await supabase.auth.signUp({email,password,options:{data:{name}}}));
+  async register(username,email,password,name) {
+    const normalized = normalizeUsername(username);
+    const signup = await supabase.auth.signUp({email,password,options:{data:{name,username:normalized}}});
+    if (signup.error) throw new Error('Username atau email sudah digunakan, atau data pendaftaran tidak valid.');
+    const result = signup.data;
+    if (result.user && Array.isArray(result.user.identities) && result.user.identities.length===0) throw new Error('Email sudah terdaftar.');
+    return result;
   },
   async logout() {
     checked(await supabase.auth.signOut({scope:'local'}));

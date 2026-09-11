@@ -4,22 +4,23 @@ export function renderLogin() {
  const app=document.getElementById('app');
  app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-logo"><h1>Apotek Mulia Farma</h1><p>Masuk dengan akun pegawai</p></div>
  <form id="login-form" class="login-form">
- <div class="form-group"><label for="login-email">Email</label><input id="login-email" class="form-input" type="email" autocomplete="username" required></div>
+ <div class="form-group"><label for="login-username">Username</label><input id="login-username" class="form-input" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,31}" autocapitalize="none" spellcheck="false" required></div>
  <div class="form-group"><label for="login-password">Password</label><input id="login-password" class="form-input" type="password" autocomplete="current-password" required></div>
  <div id="register-name" class="form-group" hidden><label for="login-name">Nama pegawai</label><input id="login-name" class="form-input" maxlength="120"></div>
+ <div id="register-email" class="form-group" hidden><label for="login-email">Email untuk pendaftaran dan pemulihan</label><input id="login-email" class="form-input" type="email" autocomplete="email"></div>
  <p id="login-message" role="status" style="margin:12px 0"></p>
  <button id="login-submit" class="btn btn-primary btn-block">Masuk</button></form>
  <button id="register-toggle" class="btn btn-ghost btn-block" style="margin-top:12px">Daftar akun pegawai</button>
  <p style="font-size:.85rem;color:var(--text-muted);margin-top:12px">Akun baru memerlukan persetujuan pemilik sebelum dapat mengakses data apotek.</p></div></div>`;
  let register=false;
  const form=document.getElementById('login-form'),button=document.getElementById('login-submit'),message=document.getElementById('login-message');
- document.getElementById('register-toggle').onclick=()=>{register=!register;document.getElementById('register-name').hidden=!register;document.getElementById('login-name').required=register;document.getElementById('login-password').minLength=register?8:1;button.textContent=register?'Daftar':'Masuk';document.getElementById('register-toggle').textContent=register?'Sudah punya akun? Masuk':'Daftar akun pegawai';message.textContent=register?'Gunakan password minimal 8 karakter.':'';};
+ document.getElementById('register-toggle').onclick=()=>{register=!register;document.getElementById('register-name').hidden=!register;document.getElementById('register-email').hidden=!register;document.getElementById('login-name').required=register;document.getElementById('login-email').required=register;document.getElementById('login-password').minLength=register?8:1;document.getElementById('login-password').autocomplete=register?'new-password':'current-password';button.textContent=register?'Daftar':'Masuk';document.getElementById('register-toggle').textContent=register?'Sudah punya akun? Masuk':'Daftar akun pegawai';message.textContent=register?'Buat username 3-32 karakter dan password minimal 8 karakter. Email hanya diperlukan saat pendaftaran atau pemulihan akun.':'';};
  form.onsubmit=async e=>{
   e.preventDefault();button.disabled=true;message.textContent='Memproses…';
   try {
-   const email=document.getElementById('login-email').value.trim(),password=document.getElementById('login-password').value;
-   if(register){const result=await auth.register(email,password,document.getElementById('login-name').value.trim());if(!result.session){message.textContent='Pendaftaran diterima. Periksa email untuk konfirmasi, kemudian masuk. Jika akun sudah ada, gunakan akun tersebut.';return;}await auth.refresh();}
-   else await auth.login(email,password);
+   const username=document.getElementById('login-username').value.trim(),password=document.getElementById('login-password').value;
+   if(register){const result=await auth.register(username,document.getElementById('login-email').value.trim(),password,document.getElementById('login-name').value.trim());if(!result.session){message.textContent='Pendaftaran diterima. Konfirmasikan email satu kali, kemudian masuk menggunakan username.';return;}await auth.refresh();}
+   else await auth.login(username,password);
    const s=auth.getSession();navigate(s?.active?(s.role==='owner'?'/dashboard':'/pos'):'/pending');
   }catch(err){message.textContent=err.message;}finally{button.disabled=false;}
  };
