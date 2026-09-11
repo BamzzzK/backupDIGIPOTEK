@@ -1,7 +1,7 @@
 // ===== DigiPotek — Main App Bootstrap =====
 import './style.css';
 import Chart from 'chart.js/auto';
-import * as lucide from 'lucide';
+import { lucide } from './icons.js';
 import { renderStaff } from './pages/staff.js';
 window.Chart = Chart;
 window.lucide = lucide;
