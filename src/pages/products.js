@@ -4,7 +4,7 @@ import { renderHeader, bindHeaderEvents } from '../components/header.js';
 import { showToast } from '../components/toast.js';
 import { showModal, closeModal } from '../components/modal.js';
 import { products } from '../store.js';
-import { runAction, formatRupiah, escapeHtml, categoryBadge, stockBadge, debounce, generateId } from '../utils.js';
+import { runAction, formatRupiah, escapeHtml, categoryBadge, stockBadge, debounce, generateId, generateBatchNo } from '../utils.js';
 
 let searchQuery = '';
 let categoryFilter = '';
@@ -199,6 +199,21 @@ function showProductForm(editId = null) {
           <input type="number" class="form-input" id="pf-minStock" value="${product ? product.minStock : 5}" min="0" />
         </div>
       </div>
+      ${!product ? `
+      <div style="border-top:1px solid var(--border);margin-top:16px;padding-top:16px">
+        <div style="font-size:0.85rem;font-weight:600;color:var(--text-muted);margin-bottom:12px">📦 Info Batch Awal</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="pf-batch">Kode Batch</label>
+            <input type="text" class="form-input" id="pf-batch" value="${generateBatchNo()}" />
+          </div>
+          <div class="form-group">
+            <label for="pf-expiry">Tanggal Kadaluarsa</label>
+            <input type="date" class="form-input" id="pf-expiry" />
+          </div>
+        </div>
+      </div>
+      ` : ''}
     </form>
   `;
 
@@ -237,6 +252,10 @@ function showProductForm(editId = null) {
       await products.update(editId, data);
       showToast('Produk berhasil diperbarui!', 'success');
     } else {
+      const batchNo = document.getElementById('pf-batch')?.value.trim() || generateBatchNo();
+      const expiry = document.getElementById('pf-expiry')?.value || null;
+      data.batchNo = batchNo;
+      data.expiry = expiry;
       data.batches = [];
       await products.add(data);
       showToast('Produk berhasil ditambahkan!', 'success');
@@ -264,7 +283,7 @@ function showAddStockModal(productId) {
       <div class="form-row">
         <div class="form-group">
           <label for="as-batch">No. Batch</label>
-          <input type="text" class="form-input" id="as-batch" placeholder="contoh: PCT-2024B" />
+          <input type="text" class="form-input" id="as-batch" value="${generateBatchNo()}" placeholder="contoh: BT20260912-3A7F" />
         </div>
         <div class="form-group">
           <label for="as-expiry">Tanggal Kadaluarsa</label>

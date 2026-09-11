@@ -332,6 +332,10 @@ function showPaymentModal() {
     <div class="form-group">
       <label for="pay-amount">Jumlah Bayar</label>
       <input type="number" class="form-input" id="pay-amount" placeholder="Masukkan nominal" autofocus style="font-size:1.2rem;font-weight:700;text-align:center" />
+      <button class="btn btn-secondary btn-block" id="btn-uang-pas" style="margin-top:8px;font-weight:600;gap:6px;display:flex;align-items:center;justify-content:center">
+        <i data-lucide="wallet" style="width:16px;height:16px"></i>
+        Uang Pas — ${formatRupiah(total)}
+      </button>
     </div>
     <div id="pay-change" style="text-align:center;margin-top:12px;font-size:1.1rem;display:none">
       <span style="color:var(--text-muted)">Kembalian: </span>
@@ -371,6 +375,15 @@ function showPaymentModal() {
       }
     });
     payAmountInput.focus();
+
+    // Uang Pas button
+    const uangPasBtn = document.getElementById('btn-uang-pas');
+    if (uangPasBtn) {
+      uangPasBtn.addEventListener('click', () => {
+        payAmountInput.value = total;
+        payAmountInput.dispatchEvent(new Event('input'));
+      });
+    }
   }
 
   document.getElementById('btn-confirm-pay').addEventListener('click', (event) => runAction(event.currentTarget, async () => {

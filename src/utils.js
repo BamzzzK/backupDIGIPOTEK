@@ -31,6 +31,16 @@ export function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
 
+/** Generate batch number based on current date */
+export function generateBatchNo() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `BT${y}${m}${d}-${rand}`;
+}
+
 /** Generate transaction number */
 export function generateTrxNo() {
   const now = new Date();
