@@ -13,7 +13,7 @@ export function renderLogin() {
  <p style="font-size:.85rem;color:var(--text-muted);margin-top:12px">Akun baru memerlukan persetujuan pemilik sebelum dapat mengakses data apotek.</p></div></div>`;
  let register=false;
  const form=document.getElementById('login-form'),button=document.getElementById('login-submit'),message=document.getElementById('login-message');
- document.getElementById('register-toggle').onclick=()=>{register=!register;document.getElementById('register-name').hidden=!register;document.getElementById('login-name').required=register;document.getElementById('login-password').minLength=register?12:1;button.textContent=register?'Daftar':'Masuk';document.getElementById('register-toggle').textContent=register?'Sudah punya akun? Masuk':'Daftar akun pegawai';message.textContent=register?'Gunakan password minimal 12 karakter.':'';};
+ document.getElementById('register-toggle').onclick=()=>{register=!register;document.getElementById('register-name').hidden=!register;document.getElementById('login-name').required=register;document.getElementById('login-password').minLength=register?8:1;button.textContent=register?'Daftar':'Masuk';document.getElementById('register-toggle').textContent=register?'Sudah punya akun? Masuk':'Daftar akun pegawai';message.textContent=register?'Gunakan password minimal 8 karakter.':'';};
  form.onsubmit=async e=>{
   e.preventDefault();button.disabled=true;message.textContent='Memproses…';
   try {

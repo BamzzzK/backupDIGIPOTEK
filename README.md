@@ -15,7 +15,7 @@ Konfigurasi publik proyek sudah disertakan di `src/supabase.js`. Untuk menggunak
 
 ## Aktivasi pemilik
 
-1. Buka aplikasi, pilih **Daftar akun pegawai**, lalu isi nama, email, dan password minimal 12 karakter.
+1. Buka aplikasi, pilih **Daftar akun pegawai**, lalu isi nama, email, dan password minimal 8 karakter.
 2. Konfirmasikan email apabila Supabase memintanya, lalu masuk kembali. Bila tautan konfirmasi mengarah ke alamat localhost yang tidak aktif, buka aplikasi kembali dan coba masuk setelah konfirmasi.
 3. Di halaman menunggu persetujuan, buka **Aktivasi pemilik pertama** dan masukkan kode sekali pakai yang diberikan terpisah oleh pengelola integrasi. Kode tidak disimpan di GitHub; database hanya menyimpan hash SHA-256.
 4. Pemilik dapat mengaktifkan akun pegawai lain sebagai kasir di **Pegawai & Data**. Akun pendaftar tidak bisa membaca data bisnis sebelum disetujui. Pendaftaran Auth tetap tersedia untuk alur persetujuan ini, bukan akses publik ke data.
