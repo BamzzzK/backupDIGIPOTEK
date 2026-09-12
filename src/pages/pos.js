@@ -50,6 +50,10 @@ export function renderPOS() {
             </div>
             <div class="pos-cart" id="pos-cart"></div>
           </div>
+          <button class="pos-cart-fab" id="pos-cart-fab" aria-label="Lihat Keranjang">
+            <i data-lucide="shopping-cart"></i>
+            <span class="pos-cart-fab-count" id="pos-cart-fab-count">0</span>
+          </button>
         </div>
       </div>
     </div>
@@ -180,7 +184,12 @@ function renderCart() {
         Keranjang
         ${cart.length > 0 ? `<span class="pos-cart-count">${cart.length}</span>` : ''}
       </h3>
-      ${cart.length > 0 ? `<button class="btn btn-ghost btn-sm" id="clear-cart"><i data-lucide="trash-2"></i> Kosongkan</button>` : ''}
+      <div style="display:flex;align-items:center;gap:8px">
+        ${cart.length > 0 ? `<button class="btn btn-ghost btn-sm" id="clear-cart"><i data-lucide="trash-2"></i> Kosongkan</button>` : ''}
+        <button class="btn-cart-close" id="btn-cart-close" aria-label="Tutup Keranjang">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
     </div>
     <div class="pos-cart-items">
       ${cart.length === 0 ? `
@@ -252,6 +261,23 @@ function renderCart() {
   `;
 
   if (window.lucide) lucide.createIcons({ nodes: [cartEl] });
+
+  // Update mobile FAB count
+  const fabCount = document.getElementById('pos-cart-fab-count');
+  if (fabCount) {
+    const totalItems = cart.reduce((s, item) => s + item.qty, 0);
+    fabCount.textContent = totalItems;
+    fabCount.style.display = totalItems > 0 ? 'flex' : 'none';
+  }
+
+  // Cart close button (mobile)
+  const cartCloseBtn = document.getElementById('btn-cart-close');
+  if (cartCloseBtn) {
+    cartCloseBtn.addEventListener('click', () => {
+      cartEl.classList.remove('pos-cart-open');
+    });
+  }
+
   bindCartEvents();
 }
 
@@ -309,6 +335,11 @@ function bindCartEvents() {
 
 function showPaymentModal() {
   if (cart.length === 0) return;
+
+  // Close mobile cart overlay so modal is fully visible
+  const cartEl = document.getElementById('pos-cart');
+  if (cartEl) cartEl.classList.remove('pos-cart-open');
+
   const page=activePOS;
   const checkoutStorageKey=pendingKey();
   const { subtotal, discount, total } = getCartTotals();
@@ -320,7 +351,7 @@ function showPaymentModal() {
     showPendingCheckout(previous);
     return;
   }
-  const requestId=previous?.requestId || crypto.randomUUID();
+  const requestId=previous?.requestId || (typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
 
   const content = `
     <div style="text-align:center;margin-bottom:20px;">
@@ -527,6 +558,17 @@ function bindPOSEvents() {
     categoryFilter = tab.dataset.cat;
     renderProductGrid();
   });
+
+  // Mobile cart FAB toggle
+  const cartFab = document.getElementById('pos-cart-fab');
+  if (cartFab) {
+    cartFab.addEventListener('click', () => {
+      const posCart = document.getElementById('pos-cart');
+      if (posCart) {
+        posCart.classList.toggle('pos-cart-open');
+      }
+    });
+  }
 }
 
 

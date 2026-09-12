@@ -13,6 +13,9 @@ export function renderHeader(title, subtitle = '') {
   return `
     <header class="header">
       <div class="header-left">
+        <button class="btn-mobile-menu" id="btn-mobile-menu" aria-label="Menu">
+          <i data-lucide="menu"></i>
+        </button>
         <div class="header-title">
           <h2>${title}</h2>
           ${subtitle ? `<p>${subtitle}</p>` : ''}
@@ -40,5 +43,31 @@ export function bindHeaderEvents() {
       navigate('/login');
     }));
   }
+
+  // Mobile sidebar toggle
+  const menuBtn = document.getElementById('btn-mobile-menu');
+  const sidebar = document.getElementById('sidebar');
+  if (menuBtn && sidebar) {
+    menuBtn.addEventListener('click', () => {
+      sidebar.classList.toggle('sidebar-open');
+    });
+    // Close sidebar when clicking a nav link (mobile)
+    sidebar.querySelectorAll('.sidebar-link').forEach(link => {
+      link.addEventListener('click', () => {
+        sidebar.classList.remove('sidebar-open');
+      });
+    });
+  }
+
+  // Close sidebar when clicking overlay backdrop
+  document.addEventListener('click', (e) => {
+    const sidebar = document.getElementById('sidebar');
+    const menuBtn = document.getElementById('btn-mobile-menu');
+    if (sidebar && sidebar.classList.contains('sidebar-open')) {
+      if (!sidebar.contains(e.target) && e.target !== menuBtn && !menuBtn.contains(e.target)) {
+        sidebar.classList.remove('sidebar-open');
+      }
+    }
+  });
 }
 
