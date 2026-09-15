@@ -4,11 +4,13 @@ import { today, businessDate } from './utils.js';
 let session = null;
 let inventory = [];
 let transactionCache = [];
+let purchaseCache = [];
+let supplierCache = [];
 let appSettings = null;
 let authEpoch = 0;
 function checked(result) { if (result.error) throw Object.assign(new Error(result.error.message), {code:result.error.code}); return result.data; }
 async function rpc(name, args) { return checked(await supabase.rpc(name, args)); }
-function clearCache() { session = null; inventory = []; transactionCache = []; appSettings = null; authEpoch++; }
+function clearCache() { session = null; inventory = []; transactionCache = []; purchaseCache = []; supplierCache = []; appSettings = null; authEpoch++; }
 function normalizeUsername(value) {
   const username = String(value || '').trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) {
@@ -93,6 +95,13 @@ export async function prepareRoute(path) {
     const d = new Date(); d.setDate(d.getDate()-30);
     await transactions.loadRange(businessDate(d),today());
   }
+  if (path==='/purchases' || path==='/purchases/new') {
+    const d = new Date(); d.setDate(d.getDate()-30);
+    await Promise.all([
+      purchases.loadRange(businessDate(d),today()),
+      suppliers.load()
+    ]);
+  }
 }
 export const products = {
   getAll:()=>inventory,
@@ -149,3 +158,328 @@ export const staff={
  async setActive(id,enabled){await rpc('manage_staff',{staff_id:id,enabled});},
 };
 export async function importLegacy(data) {return rpc('import_legacy',{payload:data});}
+
+const DEFAULT_SUPPLIERS = [
+  { id: 'sup-1', name: 'PT Kimia Farma Trading & Distribution', phone: '021-3847709', address: 'Jakarta' },
+  { id: 'sup-2', name: 'PT Anugrah Argon Medica', phone: '021-8990123', address: 'Bekasi' },
+  { id: 'sup-3', name: 'PT Mensa Bina Sukses', phone: '021-4608822', address: 'Jakarta Timur' },
+  { id: 'sup-4', name: 'PT Enseval Putera Megatrading', phone: '021-4609042', address: 'Jakarta Timur' },
+  { id: 'sup-5', name: 'PT Dos Ni Roha', phone: '021-4600022', address: 'Pulo Gadung' },
+];
+
+function loadLocalSuppliers() {
+  try {
+    const raw = localStorage.getItem('dp_suppliers');
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return DEFAULT_SUPPLIERS;
+}
+
+function saveLocalSuppliers(list) {
+  try {
+    localStorage.setItem('dp_suppliers', JSON.stringify(list));
+  } catch (e) {}
+}
+
+function loadLocalPurchases() {
+  try {
+    const raw = localStorage.getItem('dp_purchases');
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return [];
+}
+
+function saveLocalPurchases(list) {
+  try {
+    localStorage.setItem('dp_purchases', JSON.stringify(list));
+  } catch (e) {}
+}
+
+function mapPurchaseInvoice(row) {
+  return {
+    id: row.id,
+    invoiceNo: row.invoice_no || row.invoiceNo,
+    orderNo: row.order_no || row.orderNo || '',
+    supplierId: row.supplier_id || row.supplierId || null,
+    supplierName: row.supplier_name || row.supplierName || 'Umum',
+    officerId: row.officer_id || row.officerId || null,
+    officerName: row.officer_name || row.officerName || 'Petugas',
+    invoiceDate: row.invoice_date || row.invoiceDate || today(),
+    receivedAt: row.received_at || row.receivedAt || row.created_at,
+    invoiceType: row.invoice_type || row.invoiceType || 'exclude_tax',
+    warehouse: row.warehouse || 'Gudang Utama',
+    paymentType: row.payment_type || row.paymentType || 'kredit',
+    paymentTerm: Number(row.payment_term ?? row.paymentTerm ?? 0),
+    dueDate: row.due_date || row.dueDate || today(),
+    subtotal: Number(row.subtotal || 0),
+    discountType: row.discount_type || row.discountType || 'nominal',
+    discountValue: Number(row.discount_value ?? row.discountValue ?? 0),
+    discountAmount: Number(row.discount_amount ?? row.discountAmount ?? 0),
+    cashback: Number(row.cashback || 0),
+    otherFees: Number(row.other_fees ?? row.otherFees ?? 0),
+    taxPercent: Number(row.tax_percent ?? row.taxPercent ?? 0),
+    taxAmount: Number(row.tax_amount ?? row.taxAmount ?? 0),
+    total: Number(row.total || 0),
+    notes: row.notes || '',
+    pkpStatus: row.pkp_status || row.pkpStatus || 'non_pkp',
+    status: row.status || 'completed',
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    items: (row.purchase_items || row.items || []).map((it, idx) => ({
+      id: it.id || (idx + 1),
+      productId: it.product_id || it.productId,
+      productName: it.product_name || it.productName || 'Produk',
+      batchNo: it.batch_no || it.batchNo || '-',
+      expiry: it.expiry || null,
+      qty: Number(it.qty || 0),
+      unit: it.unit || 'pcs',
+      buyPrice: Number(it.buy_price ?? it.buyPrice ?? 0),
+      discountPercent: Number(it.discount_percent ?? it.discountPercent ?? 0),
+      taxPercent: Number(it.tax_percent ?? it.taxPercent ?? 0),
+      costPrice: Number(it.cost_price ?? it.costPrice ?? it.buy_price ?? it.buyPrice ?? 0),
+      subtotal: Number(it.subtotal || 0)
+    }))
+  };
+}
+
+export const suppliers = {
+  getAll() {
+    if (!supplierCache.length) {
+      supplierCache = loadLocalSuppliers();
+    }
+    return supplierCache;
+  },
+  async load() {
+    try {
+      const { data, error } = await supabase.from('suppliers').select('*').order('name');
+      if (!error && data && data.length > 0) {
+        supplierCache = data;
+        return data;
+      }
+    } catch (e) {}
+    return this.getAll();
+  },
+  async add(item) {
+    const newSupplier = {
+      id: item.id || ('sup-' + Date.now()),
+      name: (item.name || '').trim(),
+      phone: (item.phone || '').trim(),
+      address: (item.address || '').trim(),
+      createdAt: new Date().toISOString()
+    };
+    try {
+      const { data, error } = await supabase.from('suppliers').insert({
+        name: newSupplier.name,
+        phone: newSupplier.phone,
+        address: newSupplier.address
+      }).select().single();
+      if (!error && data) {
+        newSupplier.id = data.id;
+      }
+    } catch (e) {}
+    supplierCache = [newSupplier, ...supplierCache.filter(s => s.id !== newSupplier.id)];
+    saveLocalSuppliers(supplierCache);
+    return newSupplier;
+  }
+};
+
+export const purchases = {
+  getAll() {
+    if (!purchaseCache.length) {
+      purchaseCache = loadLocalPurchases();
+    }
+    return purchaseCache;
+  },
+  getById(id) {
+    const list = this.getAll();
+    return list.find(p => p.id === id || p.invoiceNo === id);
+  },
+  getByDateRange(from, to) {
+    const list = this.getAll();
+    return list.filter(p => {
+      const d = p.invoiceDate || businessDate(p.createdAt);
+      return d >= from && d <= to;
+    });
+  },
+  async loadRange(from, to) {
+    try {
+      const start = new Date(`${from}T00:00:00+07:00`).toISOString();
+      const end = new Date(new Date(`${to}T00:00:00+07:00`).getTime() + 86400000).toISOString();
+      const { data, error } = await supabase
+        .from('purchase_invoices')
+        .select('*,purchase_items(*)')
+        .gte('created_at', start)
+        .lt('created_at', end)
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        const mapped = data.map(mapPurchaseInvoice);
+        const local = loadLocalPurchases();
+        const combined = [...mapped];
+        for (const loc of local) {
+          if (!combined.some(c => c.id === loc.id || c.invoiceNo === loc.invoiceNo)) {
+            combined.push(loc);
+          }
+        }
+        purchaseCache = combined;
+        return this.getByDateRange(from, to);
+      }
+    } catch (e) {}
+    return this.getByDateRange(from, to);
+  },
+  async add(invoiceData) {
+    if (!invoiceData.invoiceNo || !invoiceData.invoiceNo.trim()) {
+      throw new Error('Nomor faktur wajib diisi.');
+    }
+    if (!invoiceData.items || invoiceData.items.length === 0) {
+      throw new Error('Faktur harus memiliki minimal satu item produk.');
+    }
+
+    // 1. Process batch stock additions for each product
+    for (const item of invoiceData.items) {
+      if (item.productId && item.qty > 0) {
+        try {
+          await rpc('change_stock', {
+            product_id: item.productId,
+            mode: 'add',
+            quantity: Number(item.qty),
+            batch_no: item.batchNo || '-',
+            expiry: item.expiry || null,
+            note: 'Faktur: ' + (invoiceData.invoiceNo || '-')
+          });
+        } catch (stockErr) {
+          const prod = inventory.find(p => p.id === item.productId);
+          if (prod) {
+            prod.stock = (prod.stock || 0) + Number(item.qty);
+            prod.availableStock = (prod.availableStock || 0) + Number(item.qty);
+            prod.batches = prod.batches || [];
+            prod.batches.push({
+              id: 'batch-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+              batchNo: item.batchNo || '-',
+              expiry: item.expiry || null,
+              qty: Number(item.qty),
+              addedAt: new Date().toISOString()
+            });
+          }
+        }
+
+        // Update product buy_price if new buy price is given
+        if (item.buyPrice && item.buyPrice > 0) {
+          const currentProd = products.getById(item.productId);
+          if (currentProd && currentProd.buyPrice !== Number(item.buyPrice)) {
+            try {
+              await products.update(item.productId, {
+                name: currentProd.name,
+                category: currentProd.category,
+                unit: currentProd.unit,
+                buyPrice: Number(item.buyPrice),
+                sellPrice: currentProd.sellPrice,
+                minStock: currentProd.minStock,
+              });
+            } catch (updErr) {
+              if (currentProd) currentProd.buyPrice = Number(item.buyPrice);
+            }
+          }
+        }
+      }
+    }
+    await refreshInventory().catch(() => {});
+
+    // 2. Prepare saved invoice object
+    const saved = {
+      id: invoiceData.id || ('pi-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)),
+      invoiceNo: invoiceData.invoiceNo.trim(),
+      orderNo: (invoiceData.orderNo || '').trim(),
+      supplierId: invoiceData.supplierId || null,
+      supplierName: invoiceData.supplierName || 'Umum',
+      officerId: session?.id || null,
+      officerName: session?.name || invoiceData.officerName || 'Petugas',
+      invoiceDate: invoiceData.invoiceDate || today(),
+      receivedAt: invoiceData.receivedAt || new Date().toISOString(),
+      invoiceType: invoiceData.invoiceType || 'exclude_tax',
+      warehouse: invoiceData.warehouse || 'Gudang Utama',
+      paymentType: invoiceData.paymentType || 'kredit',
+      paymentTerm: Number(invoiceData.paymentTerm || 0),
+      dueDate: invoiceData.dueDate || today(),
+      subtotal: Number(invoiceData.subtotal || 0),
+      discountType: invoiceData.discountType || 'nominal',
+      discountValue: Number(invoiceData.discountValue || 0),
+      discountAmount: Number(invoiceData.discountAmount || 0),
+      cashback: Number(invoiceData.cashback || 0),
+      otherFees: Number(invoiceData.otherFees || 0),
+      taxPercent: Number(invoiceData.taxPercent || 0),
+      taxAmount: Number(invoiceData.taxAmount || 0),
+      total: Number(invoiceData.total || 0),
+      notes: invoiceData.notes || '',
+      pkpStatus: invoiceData.pkpStatus || 'non_pkp',
+      status: invoiceData.status || 'completed',
+      createdAt: new Date().toISOString(),
+      items: (invoiceData.items || []).map((item, idx) => ({
+        id: item.id || (idx + 1),
+        productId: item.productId,
+        productName: item.productName,
+        batchNo: item.batchNo || '-',
+        expiry: item.expiry || null,
+        qty: Number(item.qty),
+        unit: item.unit || 'pcs',
+        buyPrice: Number(item.buyPrice || 0),
+        discountPercent: Number(item.discountPercent || 0),
+        taxPercent: Number(item.taxPercent || 0),
+        costPrice: Number(item.costPrice || item.buyPrice || 0),
+        subtotal: Number(item.subtotal || 0)
+      }))
+    };
+
+    // 3. Try to persist to Supabase
+    try {
+      const { data: invRow, error: invErr } = await supabase.from('purchase_invoices').insert({
+        invoice_no: saved.invoiceNo,
+        order_no: saved.orderNo,
+        supplier_id: saved.supplierId,
+        supplier_name: saved.supplierName,
+        officer_id: saved.officerId,
+        officer_name: saved.officerName,
+        invoice_date: saved.invoiceDate,
+        received_at: saved.receivedAt,
+        invoice_type: saved.invoiceType,
+        warehouse: saved.warehouse,
+        payment_type: saved.paymentType,
+        payment_term: saved.paymentTerm,
+        due_date: saved.dueDate,
+        subtotal: saved.subtotal,
+        discount_type: saved.discountType,
+        discount_value: saved.discountValue,
+        discount_amount: saved.discountAmount,
+        cashback: saved.cashback,
+        other_fees: saved.otherFees,
+        tax_percent: saved.taxPercent,
+        tax_amount: saved.taxAmount,
+        total: saved.total,
+        notes: saved.notes,
+        pkp_status: saved.pkpStatus,
+        status: saved.status
+      }).select().single();
+
+      if (!invErr && invRow) {
+        saved.id = invRow.id;
+        const itemRows = saved.items.map(it => ({
+          invoice_id: invRow.id,
+          product_id: it.productId,
+          product_name: it.productName,
+          batch_no: it.batchNo,
+          expiry: it.expiry,
+          qty: it.qty,
+          unit: it.unit,
+          buy_price: it.buyPrice,
+          discount_percent: it.discountPercent,
+          tax_percent: it.taxPercent,
+          cost_price: it.costPrice,
+          subtotal: it.subtotal
+        }));
+        await supabase.from('purchase_items').insert(itemRows);
+      }
+    } catch (e) {}
+
+    purchaseCache = [saved, ...purchaseCache.filter(p => p.id !== saved.id)];
+    saveLocalPurchases(purchaseCache);
+    return saved;
+  }
+};

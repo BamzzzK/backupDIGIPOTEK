@@ -33,7 +33,7 @@ export function renderReports() {
             </div>
             <div class="report-date-inputs" id="report-date-inputs">
               <input type="date" id="report-from" value="${dateFrom}" />
-              <span style="color:var(--text-muted)">—</span>
+              <span style="color:var(--text-muted)">s.d.</span>
               <input type="date" id="report-to" value="${dateTo}" />
               <button class="btn btn-sm btn-primary" id="report-apply">Terapkan</button>
             </div>

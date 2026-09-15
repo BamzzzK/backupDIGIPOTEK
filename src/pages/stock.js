@@ -200,7 +200,7 @@ function showBatchDetail(productId) {
 
   const content = `
     <div style="margin-bottom:16px;padding:12px;background:var(--bg-alt);border-radius:var(--radius)">
-      <strong>${escapeHtml(product.name)}</strong> — 
+      <strong>${escapeHtml(product.name)}</strong> · 
       ${categoryBadge(product.category)}
       <div style="margin-top:4px;font-size:0.85rem;color:var(--text-muted)">Total Stok: <strong>${product.stock} ${escapeHtml(product.unit)}</strong></div>
     </div>

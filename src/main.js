@@ -1,4 +1,4 @@
-// ===== DigiPotek — Main App Bootstrap =====
+// ===== DigiPotek: Main App Bootstrap =====
 import './style.css';
 import Chart from 'chart.js/auto';
 import { lucide } from './icons.js';
@@ -13,6 +13,7 @@ import { renderPOS } from './pages/pos.js';
 import { renderProducts } from './pages/products.js';
 import { renderStock } from './pages/stock.js';
 import { renderReports } from './pages/reports.js';
+import { renderPurchases } from './pages/purchases.js';
 
 // Initialize seed data
 async function start() {
@@ -24,6 +25,8 @@ registerRoute('/pending', renderPending);
 registerRoute('/staff', renderStaff, ['owner']);
 registerRoute('/dashboard', renderDashboard, ['owner']);
 registerRoute('/pos', renderPOS, ['owner', 'kasir']);
+registerRoute('/purchases', renderPurchases, ['owner']);
+registerRoute('/purchases/new', () => renderPurchases('new'), ['owner']);
 registerRoute('/products', renderProducts, ['owner']);
 registerRoute('/stock', renderStock, ['owner']);
 registerRoute('/reports', renderReports, ['owner']);

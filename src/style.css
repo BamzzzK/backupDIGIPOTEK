@@ -1928,3 +1928,158 @@ table tbody tr:last-child td { border-bottom: none; }
     width: calc(100vw - 260px);
   }
 }
+
+/* ===== Faktur Pembelian (Purchase Invoices) Styles ===== */
+.purchase-summary-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.summary-bar-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.summary-bar-content {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.summary-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.summary-label {
+  color: var(--text-muted);
+}
+
+.summary-value {
+  color: var(--primary);
+  font-size: 15px;
+}
+
+.purchase-create-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px 18px;
+}
+
+@media (max-width: 900px) {
+  .form-grid-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .form-grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.purchases-table th, .purchases-table td {
+  padding: 12px 14px;
+  vertical-align: middle;
+}
+
+.purchases-items-table th {
+  padding: 10px 12px;
+  font-size: 12px;
+  background: var(--bg-alt);
+  white-space: nowrap;
+}
+
+.purchases-items-table td {
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+
+.purchases-items-table .form-input-sm {
+  padding: 6px 8px;
+  font-size: 12px;
+  min-height: 34px;
+}
+
+.purchase-bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 800px) {
+  .purchase-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.calc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+
+.calc-row:last-child {
+  border-bottom: none;
+}
+
+.calc-row.total-row {
+  border-top: 2px solid var(--border);
+  border-bottom: none;
+  padding-top: 12px;
+  margin-top: 6px;
+}
+
+.calc-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.btn-toggle-disc {
+  background: var(--surface);
+  color: var(--text-muted);
+  border: none;
+  cursor: pointer;
+  transition: var(--transition);
+  font-weight: 600;
+}
+
+.btn-toggle-disc.active {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.date-filter-input {
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+  outline: none;
+}
+

@@ -14,9 +14,13 @@ export function renderSidebar() {
     { section: 'MENU UTAMA' },
     ...(isOwner ? [{ path: '/dashboard', icon: 'layout-dashboard', label: 'Dashboard' }] : []),
     { path: '/pos', icon: 'shopping-cart', label: 'Kasir (POS)' },
-    ...(isOwner ? [{ section: 'INVENTORI' },
-    { path: '/products', icon: 'package', label: 'Produk' },
-    { path: '/stock', icon: 'boxes', label: 'Manajemen Stok' }] : []),
+    ...(isOwner ? [
+      { section: 'PEMBELIAN' },
+      { path: '/purchases', icon: 'file-text', label: 'Faktur Pembelian' },
+      { section: 'INVENTORI' },
+      { path: '/products', icon: 'package', label: 'Produk' },
+      { path: '/stock', icon: 'boxes', label: 'Manajemen Stok' }
+    ] : []),
     ...(isOwner ? [
       { section: 'LAPORAN' },
       { path: '/staff', icon: 'users', label: 'Pegawai & Data' },
