@@ -53,6 +53,29 @@ const purchasesStore = {
     }
     purchaseInvoices.push(saved);
     return saved;
+  },
+  update: async (id, inv) => {
+    const idx = purchaseInvoices.findIndex(p => p.id === id);
+    if (idx !== -1) {
+      const old = purchaseInvoices[idx];
+      const oldQty = (old.items || []).reduce((s, i) => s + i.qty, 0);
+      const newQty = (inv.items || []).reduce((s, i) => s + i.qty, 0);
+      product.stock += (newQty - oldQty);
+      purchaseInvoices[idx] = { ...old, ...inv };
+      return purchaseInvoices[idx];
+    }
+    return inv;
+  },
+  remove: async (id) => {
+    const inv = purchaseInvoices.find(p => p.id === id);
+    if (inv) {
+      for (const it of (inv.items || [])) {
+        if (it.productId === product.id) {
+          product.stock -= it.qty;
+        }
+      }
+      purchaseInvoices = purchaseInvoices.filter(p => p.id !== id);
+    }
   }
 };
 
@@ -156,4 +179,90 @@ test('purchases create view adds row, calculates totals with tax, and saves invo
 
   // Verify it switches back to list view and displays the invoice in table
   assert.match(document.getElementById('purchase-page-content').textContent, /FAK-2026-001/);
+});
+
+test('purchases edit invoice updates details and adjusts stock', async () => {
+  purchaseInvoices = [{
+    id: 'inv-123',
+    invoiceNo: 'FAK-EDIT-001',
+    supplierId: 's1',
+    supplierName: 'PT Kimia Farma',
+    invoiceDate: '2026-09-15',
+    subtotal: 25000,
+    total: 27750,
+    items: [{
+      productId: 'p1',
+      productName: 'Paracetamol 500mg',
+      batchNo: 'BT-001',
+      expiry: '2027-09-15',
+      qty: 5,
+      unit: 'strip',
+      buyPrice: 5000,
+      discountPercent: 0,
+      taxPercent: 0,
+      costPrice: 5000,
+      subtotal: 25000
+    }]
+  }];
+  product.stock = 15;
+
+  controller = renderPurchases('list');
+  const editBtn = document.querySelector('.btn-edit-invoice');
+  assert.ok(editBtn);
+  editBtn.click();
+  await settle();
+
+  assert.match(document.querySelector('.purchase-create-header').textContent, /Edit Faktur/);
+  assert.equal(document.getElementById('inv-no').value, 'FAK-EDIT-001');
+
+  // Change quantity to 8 (+3 more)
+  const qtyInput = document.querySelector('.item-qty');
+  qtyInput.value = '8';
+  qtyInput.dispatchEvent(new dom.window.Event('input'));
+  await settle();
+
+  // Save changes
+  document.getElementById('btn-save-purchase').click();
+  await settle();
+
+  // Stock should be 15 - 5 + 8 = 18
+  assert.equal(product.stock, 18);
+  assert.match(document.getElementById('purchase-page-content').textContent, /FAK-EDIT-001/);
+});
+
+test('purchases delete invoice removes from list and reverts stock', async () => {
+  purchaseInvoices = [{
+    id: 'inv-del-1',
+    invoiceNo: 'FAK-DEL-001',
+    supplierId: 's1',
+    supplierName: 'PT Kimia Farma',
+    invoiceDate: '2026-09-15',
+    subtotal: 25000,
+    total: 27750,
+    items: [{
+      productId: 'p1',
+      productName: 'Paracetamol 500mg',
+      qty: 5,
+      unit: 'strip',
+      buyPrice: 5000
+    }]
+  }];
+  product.stock = 15;
+
+  controller = renderPurchases('list');
+  const delBtn = document.querySelector('.btn-delete-invoice');
+  assert.ok(delBtn);
+  delBtn.click();
+  await settle();
+
+  // Confirmation modal should open
+  const confirmBtn = document.getElementById('btn-confirm-del');
+  assert.ok(confirmBtn);
+  confirmBtn.click();
+  await settle();
+
+  // Invoice deleted and stock reverted: 15 - 5 = 10
+  assert.equal(purchaseInvoices.length, 0);
+  assert.equal(product.stock, 10);
+  assert.match(document.getElementById('purchase-page-content').textContent, /Data faktur tidak ditemukan/);
 });

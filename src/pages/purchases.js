@@ -184,9 +184,17 @@ function renderTableContent(items) {
           <strong style="color:var(--primary)">${formatRupiah(inv.total)}</strong>
         </td>
         <td style="text-align:center">
-          <button class="btn btn-sm btn-secondary btn-icon-only btn-view-invoice" data-id="${inv.id}" title="Lihat Rincian Faktur" aria-label="Lihat Rincian Faktur">
-            <i data-lucide="eye"></i>
-          </button>
+          <div style="display:flex;gap:4px;justify-content:center">
+            <button class="btn btn-sm btn-secondary btn-icon-only btn-view-invoice" data-id="${inv.id}" title="Lihat Rincian Faktur" aria-label="Lihat Rincian Faktur">
+              <i data-lucide="eye"></i>
+            </button>
+            <button class="btn btn-sm btn-secondary btn-icon-only btn-edit-invoice" data-id="${inv.id}" title="Edit Faktur" aria-label="Edit Faktur">
+              <i data-lucide="edit-3"></i>
+            </button>
+            <button class="btn btn-sm btn-secondary btn-icon-only btn-delete-invoice" data-id="${inv.id}" title="Batalkan Faktur" aria-label="Batalkan Faktur" style="color:var(--danger)">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
         </td>
       </tr>
     `;
@@ -218,6 +226,7 @@ function initListViewEvents() {
   if (!content) return;
 
   const switchToCreate = () => {
+    resetFormState();
     activeView = 'create';
     content.innerHTML = renderCreateView();
     if (window.lucide) lucide.createIcons();
@@ -295,6 +304,9 @@ function initListViewEvents() {
 }
 
 function bindViewDetailButtons() {
+  const content = document.getElementById('purchase-page-content');
+
+  // View invoice detail
   const viewBtns = document.querySelectorAll('.btn-view-invoice');
   viewBtns.forEach(btn => {
     btn.onclick = () => {
@@ -305,6 +317,97 @@ function bindViewDetailButtons() {
       }
     };
   });
+
+  // Edit invoice
+  const editBtns = document.querySelectorAll('.btn-edit-invoice');
+  editBtns.forEach(btn => {
+    btn.onclick = () => {
+      const invId = btn.getAttribute('data-id');
+      const invoice = purchases.getById(invId);
+      if (invoice) {
+        formState = {
+          editingId: invoice.id,
+          supplierId: invoice.supplierId || '',
+          supplierName: invoice.supplierName || '',
+          orderNo: invoice.orderNo || '',
+          invoiceNo: invoice.invoiceNo || '',
+          invoiceDate: invoice.invoiceDate || today(),
+          receivedAt: invoice.receivedAt ? invoice.receivedAt.slice(0, 16) : new Date().toISOString().slice(0, 16),
+          invoiceType: invoice.invoiceType || 'exclude_tax',
+          warehouse: invoice.warehouse || 'Gudang Utama',
+          paymentType: invoice.paymentType || 'kredit',
+          paymentTerm: Number(invoice.paymentTerm || 0),
+          dueDate: invoice.dueDate || '',
+          discountType: invoice.discountType || 'persen',
+          discountValue: Number(invoice.discountValue || 0),
+          cashback: Number(invoice.cashback || 0),
+          otherFees: Number(invoice.otherFees || 0),
+          notes: invoice.notes || '',
+          pkpStatus: invoice.pkpStatus || 'non_pkp',
+          items: (invoice.items || []).map(it => ({ ...it }))
+        };
+
+        activeView = 'create';
+        if (content) {
+          content.innerHTML = renderCreateView();
+          if (window.lucide) lucide.createIcons();
+          initCreateViewEvents();
+        }
+      }
+    };
+  });
+
+  // Delete invoice
+  const deleteBtns = document.querySelectorAll('.btn-delete-invoice');
+  deleteBtns.forEach(btn => {
+    btn.onclick = () => {
+      const invId = btn.getAttribute('data-id');
+      const invoice = purchases.getById(invId);
+      if (invoice) {
+        showDeleteInvoiceModal(invoice);
+      }
+    };
+  });
+}
+
+function showDeleteInvoiceModal(inv) {
+  const modalHtml = `
+    <div style="padding:10px 0">
+      <p style="margin-bottom:12px;font-size:14px">
+        Apakah Anda yakin ingin membatalkan/menghapus faktur <strong>${escapeHtml(inv.invoiceNo)}</strong> dari <strong>${escapeHtml(inv.supplierName || 'Supplier')}</strong>?
+      </p>
+      <div style="background:var(--danger-light);color:var(--danger-hover);padding:12px;border-radius:var(--radius);font-size:12px;margin-bottom:16px">
+        <strong>Perhatian:</strong> Seluruh kuantitas obat dari faktur ini (${(inv.items || []).length} jenis produk) akan otomatis dikurangi kembali dari stok inventori apotek.
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button type="button" class="btn btn-secondary" id="btn-cancel-del">Batal</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-del">
+          <i data-lucide="trash-2"></i>
+          Ya, Batalkan & Kurangi Stok
+        </button>
+      </div>
+    </div>
+  `;
+
+  showModal({ title: `Batalkan Faktur: ${escapeHtml(inv.invoiceNo)}`, content: modalHtml });
+  if (window.lucide) lucide.createIcons();
+
+  document.getElementById('btn-cancel-del').onclick = closeModal;
+  document.getElementById('btn-confirm-del').onclick = async () => {
+    try {
+      await purchases.remove(inv.id);
+      closeModal();
+      showToast(`Faktur ${inv.invoiceNo} berhasil dibatalkan dan stok telah disesuaikan.`, 'success');
+      const content = document.getElementById('purchase-page-content');
+      if (content) {
+        content.innerHTML = renderListView();
+        if (window.lucide) lucide.createIcons();
+        initListViewEvents();
+      }
+    } catch (err) {
+      showToast('Gagal membatalkan faktur: ' + err.message, 'error');
+    }
+  };
 }
 
 function showInvoiceDetailModal(inv) {
@@ -418,7 +521,7 @@ function showInvoiceDetailModal(inv) {
     </div>
   `;
 
-  showModal(`Rincian Faktur: ${escapeHtml(inv.invoiceNo)}`, modalHtml);
+  showModal({ title: `Rincian Faktur: ${escapeHtml(inv.invoiceNo)}`, content: modalHtml });
   if (window.lucide) lucide.createIcons();
 
   document.getElementById('btn-close-modal').onclick = closeModal;
@@ -430,6 +533,7 @@ function showInvoiceDetailModal(inv) {
 // ===== 2. CREATE INVOICE VIEW =====
 
 let formState = {
+  editingId: null,
   supplierId: '',
   supplierName: '',
   orderNo: '',
@@ -450,6 +554,30 @@ let formState = {
   items: []
 };
 
+function resetFormState() {
+  formState = {
+    editingId: null,
+    supplierId: '',
+    supplierName: '',
+    orderNo: '',
+    invoiceNo: '',
+    invoiceDate: today(),
+    receivedAt: new Date().toISOString().slice(0, 16),
+    invoiceType: 'exclude_tax',
+    warehouse: 'Gudang Utama',
+    paymentType: 'kredit',
+    paymentTerm: 30,
+    dueDate: '',
+    discountType: 'persen',
+    discountValue: 0,
+    cashback: 0,
+    otherFees: 0,
+    notes: '',
+    pkpStatus: 'non_pkp',
+    items: []
+  };
+}
+
 function renderCreateView() {
   const rawSuppliers = suppliers.getAll ? suppliers.getAll() : [];
   const allSuppliers = Array.isArray(rawSuppliers) ? rawSuppliers : [];
@@ -469,6 +597,11 @@ function renderCreateView() {
     <option value="${s.id}" ${formState.supplierId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>
   `).join('');
 
+  const isEditing = Boolean(formState.editingId);
+  const headerTitle = isEditing ? `Edit Faktur: ${escapeHtml(formState.invoiceNo || '')}` : 'Tambah Faktur Pembelian';
+  const headerDesc = isEditing ? 'Perbarui data faktur dan sesuaikan kuantitas obat' : 'Catat penerimaan stok obat dan rincian tagihan dari supplier';
+  const saveBtnText = isEditing ? 'Simpan Perubahan' : 'Simpan Faktur';
+
   return `
     <div class="purchase-create-header animate-slide-up">
       <div style="display:flex;align-items:center;gap:12px">
@@ -476,15 +609,15 @@ function renderCreateView() {
           <i data-lucide="arrow-left"></i>
         </button>
         <div>
-          <h2 style="font-size:18px;font-weight:700;margin:0">Tambah Faktur Pembelian</h2>
-          <p style="font-size:12px;color:var(--text-muted);margin:0">Catat penerimaan stok obat dan rincian tagihan dari supplier</p>
+          <h2 style="font-size:18px;font-weight:700;margin:0">${headerTitle}</h2>
+          <p style="font-size:12px;color:var(--text-muted);margin:0">${headerDesc}</p>
         </div>
       </div>
       <div style="display:flex;gap:10px">
         <button class="btn btn-secondary" id="btn-cancel-create">Batal</button>
         <button class="btn btn-primary" id="btn-save-purchase">
           <i data-lucide="check"></i>
-          <span>Simpan Faktur</span>
+          <span>${saveBtnText}</span>
         </button>
       </div>
     </div>
@@ -827,10 +960,14 @@ function initCreateViewEvents() {
   const btnBack = document.getElementById('btn-back-to-list');
   const btnCancel = document.getElementById('btn-cancel-create');
   const returnToList = () => {
+    resetFormState();
     activeView = 'list';
     content.innerHTML = renderListView();
     if (window.lucide) lucide.createIcons();
     initListViewEvents();
+    if (window.location && window.location.hash !== '#/purchases') {
+      window.location.hash = '/purchases';
+    }
   };
   if (btnBack) btnBack.onclick = returnToList;
   if (btnCancel) btnCancel.onclick = returnToList;
@@ -1119,7 +1256,7 @@ function showAddSupplierModal() {
     </form>
   `;
 
-  showModal('Tambah Supplier Baru', modalHtml);
+  showModal({ title: 'Tambah Supplier Baru', content: modalHtml });
 
   document.getElementById('btn-cancel-supp').onclick = closeModal;
   document.getElementById('form-quick-supplier').onsubmit = async (e) => {
@@ -1292,30 +1429,16 @@ async function handleSaveInvoice() {
   }
 
   try {
-    const saved = await purchases.add(invoicePayload);
-    showToast(`Faktur ${saved.invoiceNo} berhasil disimpan dan stok batch telah diperbarui.`, 'success');
+    let saved;
+    if (formState.editingId) {
+      saved = await purchases.update(formState.editingId, invoicePayload);
+      showToast(`Faktur ${saved.invoiceNo} berhasil diperbarui dan stok telah disesuaikan.`, 'success');
+    } else {
+      saved = await purchases.add(invoicePayload);
+      showToast(`Faktur ${saved.invoiceNo} berhasil disimpan dan stok batch telah diperbarui.`, 'success');
+    }
 
-    // Reset form state
-    formState = {
-      supplierId: '',
-      supplierName: '',
-      orderNo: '',
-      invoiceNo: '',
-      invoiceDate: today(),
-      receivedAt: new Date().toISOString().slice(0, 16),
-      invoiceType: 'exclude_tax',
-      warehouse: 'Gudang Utama',
-      paymentType: 'kredit',
-      paymentTerm: 30,
-      dueDate: '',
-      discountType: 'persen',
-      discountValue: 0,
-      cashback: 0,
-      otherFees: 0,
-      notes: '',
-      pkpStatus: 'non_pkp',
-      items: []
-    };
+    resetFormState();
 
     // Return to list view
     activeView = 'list';
@@ -1324,6 +1447,9 @@ async function handleSaveInvoice() {
       content.innerHTML = renderListView();
       if (window.lucide) lucide.createIcons();
       initListViewEvents();
+    }
+    if (window.location && window.location.hash !== '#/purchases') {
+      window.location.hash = '/purchases';
     }
   } catch (err) {
     showToast('Gagal menyimpan faktur: ' + err.message, 'error');

@@ -1,7 +1,12 @@
 // ===== DigiPotek Modal Component =====
 
-export function showModal({ title, content, size = '', onClose, footer }) {
+export function showModal(optionsOrTitle, maybeContent = '', maybeSize = '') {
   closeModal(); // Close any existing modal
+
+  const options = typeof optionsOrTitle === 'string'
+    ? { title: optionsOrTitle, content: maybeContent, size: maybeSize }
+    : (optionsOrTitle || {});
+  const { title, content, size = '', onClose, footer } = options;
   
   const container = document.getElementById('modal-container');
   const sizeClass = size ? `modal-${size}` : '';

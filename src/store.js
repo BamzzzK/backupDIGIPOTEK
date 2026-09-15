@@ -481,5 +481,206 @@ export const purchases = {
     purchaseCache = [saved, ...purchaseCache.filter(p => p.id !== saved.id)];
     saveLocalPurchases(purchaseCache);
     return saved;
+  },
+  async update(id, invoiceData) {
+    const existing = this.getById(id);
+    if (!existing) throw new Error('Faktur tidak ditemukan.');
+
+    // Adjust stock differences between old and new items
+    const oldItemsMap = new Map();
+    (existing.items || []).forEach(it => {
+      oldItemsMap.set(it.productId, (oldItemsMap.get(it.productId) || 0) + Number(it.qty));
+    });
+
+    const newItemsMap = new Map();
+    (invoiceData.items || []).forEach(it => {
+      newItemsMap.set(it.productId, (newItemsMap.get(it.productId) || 0) + Number(it.qty));
+    });
+
+    // Handle products in new items
+    for (const [prodId, newQty] of newItemsMap.entries()) {
+      const oldQty = oldItemsMap.get(prodId) || 0;
+      const delta = newQty - oldQty;
+      if (delta > 0) {
+        const item = invoiceData.items.find(i => i.productId === prodId);
+        try {
+          await rpc('change_stock', {
+            product_id: prodId,
+            mode: 'add',
+            quantity: delta,
+            batch_no: item?.batchNo || '-',
+            expiry: item?.expiry || null,
+            note: 'Revisi Faktur: ' + (invoiceData.invoiceNo || existing.invoiceNo)
+          });
+        } catch (e) {
+          const prod = inventory.find(p => p.id === prodId);
+          if (prod) {
+            prod.stock = (prod.stock || 0) + delta;
+            prod.availableStock = (prod.availableStock || 0) + delta;
+          }
+        }
+      } else if (delta < 0) {
+        try {
+          await rpc('change_stock', {
+            product_id: prodId,
+            mode: 'subtract',
+            quantity: Math.abs(delta),
+            note: 'Revisi Pengurangan Faktur: ' + (invoiceData.invoiceNo || existing.invoiceNo)
+          });
+        } catch (e) {
+          const prod = inventory.find(p => p.id === prodId);
+          if (prod) {
+            prod.stock = Math.max(0, (prod.stock || 0) + delta);
+            prod.availableStock = Math.max(0, (prod.availableStock || 0) + delta);
+          }
+        }
+      }
+    }
+
+    // Handle removed products completely
+    for (const [prodId, oldQty] of oldItemsMap.entries()) {
+      if (!newItemsMap.has(prodId) && oldQty > 0) {
+        try {
+          await rpc('change_stock', {
+            product_id: prodId,
+            mode: 'subtract',
+            quantity: oldQty,
+            note: 'Hapus Item Faktur: ' + existing.invoiceNo
+          });
+        } catch (e) {
+          const prod = inventory.find(p => p.id === prodId);
+          if (prod) {
+            prod.stock = Math.max(0, (prod.stock || 0) - oldQty);
+            prod.availableStock = Math.max(0, (prod.availableStock || 0) - oldQty);
+          }
+        }
+      }
+    }
+
+    await refreshInventory().catch(() => {});
+
+    const updated = {
+      ...existing,
+      invoiceNo: (invoiceData.invoiceNo || existing.invoiceNo).trim(),
+      orderNo: (invoiceData.orderNo ?? existing.orderNo).trim(),
+      supplierId: invoiceData.supplierId ?? existing.supplierId,
+      supplierName: invoiceData.supplierName || existing.supplierName,
+      invoiceDate: invoiceData.invoiceDate || existing.invoiceDate,
+      receivedAt: invoiceData.receivedAt || existing.receivedAt,
+      invoiceType: invoiceData.invoiceType || existing.invoiceType,
+      warehouse: invoiceData.warehouse || existing.warehouse,
+      paymentType: invoiceData.paymentType || existing.paymentType,
+      paymentTerm: Number(invoiceData.paymentTerm ?? existing.paymentTerm ?? 0),
+      dueDate: invoiceData.dueDate || existing.dueDate,
+      subtotal: Number(invoiceData.subtotal ?? existing.subtotal ?? 0),
+      discountType: invoiceData.discountType || existing.discountType,
+      discountValue: Number(invoiceData.discountValue ?? existing.discountValue ?? 0),
+      discountAmount: Number(invoiceData.discountAmount ?? existing.discountAmount ?? 0),
+      cashback: Number(invoiceData.cashback ?? existing.cashback ?? 0),
+      otherFees: Number(invoiceData.otherFees ?? existing.otherFees ?? 0),
+      taxPercent: Number(invoiceData.taxPercent ?? existing.taxPercent ?? 0),
+      taxAmount: Number(invoiceData.taxAmount ?? existing.taxAmount ?? 0),
+      total: Number(invoiceData.total ?? existing.total ?? 0),
+      notes: invoiceData.notes ?? existing.notes ?? '',
+      pkpStatus: invoiceData.pkpStatus || existing.pkpStatus,
+      updatedAt: new Date().toISOString(),
+      items: (invoiceData.items || []).map((item, idx) => ({
+        id: item.id || (idx + 1),
+        productId: item.productId,
+        productName: item.productName,
+        batchNo: item.batchNo || '-',
+        expiry: item.expiry || null,
+        qty: Number(item.qty),
+        unit: item.unit || 'pcs',
+        buyPrice: Number(item.buyPrice || 0),
+        discountPercent: Number(item.discountPercent || 0),
+        taxPercent: Number(item.taxPercent || 0),
+        costPrice: Number(item.costPrice || item.buyPrice || 0),
+        subtotal: Number(item.subtotal || 0)
+      }))
+    };
+
+    try {
+      await supabase.from('purchase_invoices').update({
+        invoice_no: updated.invoiceNo,
+        order_no: updated.orderNo,
+        supplier_id: updated.supplierId,
+        supplier_name: updated.supplierName,
+        invoice_date: updated.invoiceDate,
+        received_at: updated.receivedAt,
+        invoice_type: updated.invoiceType,
+        warehouse: updated.warehouse,
+        payment_type: updated.paymentType,
+        payment_term: updated.paymentTerm,
+        due_date: updated.dueDate,
+        subtotal: updated.subtotal,
+        discount_type: updated.discountType,
+        discount_value: updated.discountValue,
+        discount_amount: updated.discountAmount,
+        cashback: updated.cashback,
+        other_fees: updated.otherFees,
+        tax_percent: updated.taxPercent,
+        tax_amount: updated.taxAmount,
+        total: updated.total,
+        notes: updated.notes,
+        pkp_status: updated.pkpStatus
+      }).eq('id', updated.id);
+
+      await supabase.from('purchase_items').delete().eq('invoice_id', updated.id);
+      const itemRows = updated.items.map(it => ({
+        invoice_id: updated.id,
+        product_id: it.productId,
+        product_name: it.productName,
+        batch_no: it.batchNo,
+        expiry: it.expiry,
+        qty: it.qty,
+        unit: it.unit,
+        buy_price: it.buyPrice,
+        discount_percent: it.discountPercent,
+        tax_percent: it.taxPercent,
+        cost_price: it.costPrice,
+        subtotal: it.subtotal
+      }));
+      await supabase.from('purchase_items').insert(itemRows);
+    } catch (e) {}
+
+    purchaseCache = purchaseCache.map(p => (p.id === updated.id ? updated : p));
+    saveLocalPurchases(purchaseCache);
+    return updated;
+  },
+  async remove(id) {
+    const existing = this.getById(id);
+    if (!existing) return;
+
+    // Deduct previously added stock
+    for (const item of (existing.items || [])) {
+      if (item.productId && item.qty > 0) {
+        try {
+          await rpc('change_stock', {
+            product_id: item.productId,
+            mode: 'subtract',
+            quantity: Number(item.qty),
+            note: 'Pembatalan Faktur: ' + existing.invoiceNo
+          });
+        } catch (e) {
+          const prod = inventory.find(p => p.id === item.productId);
+          if (prod) {
+            prod.stock = Math.max(0, (prod.stock || 0) - Number(item.qty));
+            prod.availableStock = Math.max(0, (prod.availableStock || 0) - Number(item.qty));
+          }
+        }
+      }
+    }
+    await refreshInventory().catch(() => {});
+
+    // Delete from Supabase
+    try {
+      await supabase.from('purchase_items').delete().eq('invoice_id', existing.id);
+      await supabase.from('purchase_invoices').delete().eq('id', existing.id);
+    } catch (e) {}
+
+    // Delete from local cache
+    purchaseCache = purchaseCache.filter(p => p.id !== existing.id && p.invoiceNo !== existing.invoiceNo);
+    saveLocalPurchases(purchaseCache);
   }
 };
