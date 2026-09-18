@@ -195,7 +195,7 @@ function renderInstallContent(platform) {
     `;
   }
 
-  // Android & Desktop — use install prompt
+  // Android & Desktop — use install prompt + manual fallback
   return `
     <div class="install-info">
       <div class="install-info-header">
@@ -212,9 +212,31 @@ function renderInstallContent(platform) {
           <i data-lucide="download"></i>
           Install DigiPotek
         </button>
-        <p class="install-hint" id="install-hint">
-          ${window.deferredInstallPrompt ? 'Klik tombol di atas untuk menginstall aplikasi' : 'Tombol install akan tersedia saat browser mendukung instalasi PWA'}
-        </p>
+        <p class="install-hint" id="install-hint">Klik tombol di atas untuk menginstall aplikasi</p>
+      </div>
+      <div class="install-steps" id="install-manual-steps" style="display:none;">
+        <p style="font-weight:600;margin-bottom:8px;">Atau install secara manual:</p>
+        <div class="install-step">
+          <div class="install-step-number">1</div>
+          <div class="install-step-text">
+            <strong>Buka menu browser</strong>
+            <p>Ketuk ikon <strong>⋮</strong> (titik tiga) di pojok kanan atas Chrome</p>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="install-step-number">2</div>
+          <div class="install-step-text">
+            <strong>Pilih "${platform === 'android' ? 'Tambahkan ke Layar utama' : 'Install DigiPotek...'}"</strong>
+            <p>${platform === 'android' ? 'Atau pilih "Install app" jika tersedia dalam menu' : 'Atau pilih "Install DigiPotek..." dari menu browser'}</p>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="install-step-number">3</div>
+          <div class="install-step-text">
+            <strong>Konfirmasi Install</strong>
+            <p>Ketuk "Install" atau "Tambahkan". Ikon DigiPotek akan muncul di Home Screen!</p>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -232,38 +254,45 @@ function bindSettingsEvents() {
     });
   });
 
-  // Install button
+  // Install button — always active, with fallback to manual guide
   const installBtn = document.getElementById('btn-install-app');
   if (installBtn) {
-    if (!window.deferredInstallPrompt) {
-      installBtn.disabled = true;
-      installBtn.style.opacity = '0.5';
-    }
-
     installBtn.addEventListener('click', async () => {
       const prompt = window.deferredInstallPrompt;
-      if (!prompt) return;
-
-      prompt.prompt();
-      const { outcome } = await prompt.userChoice;
-      if (outcome === 'accepted') {
-        window.deferredInstallPrompt = null;
-        installBtn.innerHTML = '<i data-lucide="check-circle"></i> Terinstall!';
-        installBtn.disabled = true;
+      if (prompt) {
+        // Browser prompt is available — use it
+        prompt.prompt();
+        const { outcome } = await prompt.userChoice;
+        if (outcome === 'accepted') {
+          window.deferredInstallPrompt = null;
+          installBtn.innerHTML = '<i data-lucide="check-circle"></i> Terinstall!';
+          installBtn.disabled = true;
+          const hint = document.getElementById('install-hint');
+          if (hint) hint.textContent = 'DigiPotek berhasil diinstall! Cek Home Screen Anda.';
+          window.lucide.createIcons();
+        }
+      } else {
+        // No browser prompt — show manual install steps
+        const manualSteps = document.getElementById('install-manual-steps');
+        if (manualSteps) {
+          manualSteps.style.display = 'flex';
+          manualSteps.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
         const hint = document.getElementById('install-hint');
-        if (hint) hint.textContent = 'DigiPotek berhasil diinstall! Cek Home Screen Anda.';
-        window.lucide.createIcons();
+        if (hint) hint.textContent = 'Ikuti panduan manual di bawah untuk menginstall aplikasi';
       }
     });
 
-    // Listen for deferred prompt becoming available
+    // If prompt becomes available later, auto-enable direct install
     window.addEventListener('pwa-install-available', () => {
       if (installBtn.isConnected) {
-        installBtn.disabled = false;
-        installBtn.style.opacity = '1';
         const hint = document.getElementById('install-hint');
         if (hint) hint.textContent = 'Klik tombol di atas untuk menginstall aplikasi';
+        // Hide manual steps if they were shown
+        const manualSteps = document.getElementById('install-manual-steps');
+        if (manualSteps) manualSteps.style.display = 'none';
       }
     });
   }
 }
+
