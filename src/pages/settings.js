@@ -110,7 +110,7 @@ export function renderSettings() {
                 <div class="settings-about">
                   <div class="about-row">
                     <span class="about-label">Aplikasi</span>
-                    <span class="about-value">DigiPotek — Kasir Apotek Digital</span>
+                    <span class="about-value">Apotek Mulia Farma — Kasir Apotek Digital</span>
                   </div>
                   <div class="about-row">
                     <span class="about-label">Versi</span>
@@ -149,7 +149,7 @@ function renderInstalledBadge() {
       </div>
       <div class="install-status-text">
         <h4>Aplikasi Sudah Terinstall!</h4>
-        <p>DigiPotek sudah berjalan sebagai aplikasi di perangkat Anda.</p>
+        <p>Apotek Mulia Farma sudah berjalan sebagai aplikasi di perangkat Anda.</p>
       </div>
     </div>
   `;
@@ -165,7 +165,7 @@ function renderInstallContent(platform) {
           </div>
           <div>
             <h4>Install di iPhone / iPad</h4>
-            <p>Ikuti langkah-langkah berikut untuk menambahkan DigiPotek ke Home Screen Anda</p>
+            <p>Ikuti langkah-langkah berikut untuk menambahkan Apotek Mulia Farma ke Home Screen Anda</p>
           </div>
         </div>
         <div class="install-steps">
@@ -187,7 +187,7 @@ function renderInstallContent(platform) {
             <div class="install-step-number">3</div>
             <div class="install-step-text">
               <strong>Ketuk "Add"</strong>
-              <p>Konfirmasi dengan mengetuk "Add" di pojok kanan atas. Ikon DigiPotek akan muncul di Home Screen Anda!</p>
+              <p>Konfirmasi dengan mengetuk "Add" di pojok kanan atas. Ikon Apotek Mulia Farma akan muncul di Home Screen Anda!</p>
             </div>
           </div>
         </div>
@@ -204,13 +204,13 @@ function renderInstallContent(platform) {
         </div>
         <div>
           <h4>Install di ${platform === 'android' ? 'Android' : 'Komputer'}</h4>
-          <p>Pasang DigiPotek sebagai aplikasi untuk akses cepat dari Home Screen</p>
+          <p>Pasang Apotek Mulia Farma sebagai aplikasi untuk akses cepat dari Home Screen</p>
         </div>
       </div>
       <div class="install-action">
         <button class="btn btn-primary btn-lg" id="btn-install-app">
           <i data-lucide="download"></i>
-          Install DigiPotek
+          Install Apotek Mulia Farma
         </button>
         <p class="install-hint" id="install-hint">Klik tombol di atas untuk menginstall aplikasi</p>
       </div>
@@ -226,15 +226,15 @@ function renderInstallContent(platform) {
         <div class="install-step">
           <div class="install-step-number">2</div>
           <div class="install-step-text">
-            <strong>Pilih "${platform === 'android' ? 'Tambahkan ke Layar utama' : 'Install DigiPotek...'}"</strong>
-            <p>${platform === 'android' ? 'Atau pilih "Install app" jika tersedia dalam menu' : 'Atau pilih "Install DigiPotek..." dari menu browser'}</p>
+            <strong>Pilih "${platform === 'android' ? 'Tambahkan ke Layar utama' : 'Install Apotek Mulia Farma...'}"</strong>
+            <p>${platform === 'android' ? 'Atau pilih "Install app" jika tersedia dalam menu' : 'Atau pilih "Install Apotek Mulia Farma..." dari menu browser'}</p>
           </div>
         </div>
         <div class="install-step">
           <div class="install-step-number">3</div>
           <div class="install-step-text">
             <strong>Konfirmasi Install</strong>
-            <p>Ketuk "Install" atau "Tambahkan". Ikon DigiPotek akan muncul di Home Screen!</p>
+            <p>Ketuk "Install" atau "Tambahkan". Ikon Apotek Mulia Farma akan muncul di Home Screen!</p>
           </div>
         </div>
       </div>
@@ -268,7 +268,7 @@ function bindSettingsEvents() {
           installBtn.innerHTML = '<i data-lucide="check-circle"></i> Terinstall!';
           installBtn.disabled = true;
           const hint = document.getElementById('install-hint');
-          if (hint) hint.textContent = 'DigiPotek berhasil diinstall! Cek Home Screen Anda.';
+          if (hint) hint.textContent = 'Apotek Mulia Farma berhasil diinstall! Cek Home Screen Anda.';
           window.lucide.createIcons();
         }
       } else {

@@ -53,7 +53,7 @@ export function renderSidebar() {
           <i data-lucide="pill"></i>
         </div>
         <div class="sidebar-brand">
-          <h2>DigiPotek</h2>
+          <h2>Apotek Mulia Farma</h2>
           <p>Apotek Digital</p>
         </div>
       </div>
