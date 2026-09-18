@@ -4,17 +4,41 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="DigiPotek — Aplikasi Kasir & Manajemen Stok Apotek Digital" />
+  <meta name="theme-color" content="#059669" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="DigiPotek" />
   <title>DigiPotek — Kasir Apotek Digital</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icon-192.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script>
+    // Apply saved theme before render to prevent flash
+    const t = localStorage.getItem('digipotek-theme');
+    if (t) document.documentElement.setAttribute('data-theme', t);
+  </script>
 </head>
 <body>
   <div id="app"></div>
   <div id="toast-container"></div>
   <div id="modal-container"></div>
   <script type="module" src="/src/main.js"></script>
+  <script>
+    // Register Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+    // Capture install prompt for later use
+    window.deferredInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      window.deferredInstallPrompt = e;
+      window.dispatchEvent(new Event('pwa-install-available'));
+    });
+  </script>
 </body>
 </html>
 

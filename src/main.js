@@ -13,6 +13,7 @@ import { renderStock } from './pages/stock.js';
 import { renderReports } from './pages/reports.js';
 import { renderPurchases } from './pages/purchases.js';
 import { renderHistory } from './pages/history.js';
+import { renderSettings } from './pages/settings.js';
 
 // Initialize seed data
 async function start() {
@@ -30,6 +31,7 @@ registerRoute('/products', renderProducts, ['owner']);
 registerRoute('/stock', renderStock, ['owner', 'kasir']);
 registerRoute('/history', renderHistory, ['owner', 'kasir']);
 registerRoute('/reports', renderReports, ['owner']);
+registerRoute('/settings', renderSettings, ['owner', 'kasir']);
 
 // Start router
 initRouter();
@@ -37,3 +39,4 @@ initRouter();
 
 }
 start();
+

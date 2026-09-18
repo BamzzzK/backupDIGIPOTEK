@@ -26,6 +26,8 @@ export function renderSidebar() {
       { path: '/staff', icon: 'users', label: 'Pegawai & Data' },
       { path: '/reports', icon: 'bar-chart-3', label: 'Laporan & Margin' },
     ] : []),
+    { section: 'LAINNYA' },
+    { path: '/settings', icon: 'settings', label: 'Pengaturan' },
   ];
 
   const menuHtml = menuItems.map(item => {
