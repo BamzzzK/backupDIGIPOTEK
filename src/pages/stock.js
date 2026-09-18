@@ -271,7 +271,7 @@ function showAdjustStock(productId) {
   `;
 
   const footer = `
-    <button class="btn btn-secondary" onclick="document.getElementById('modal-close-btn').click()">Batal</button>
+    <button class="btn btn-secondary" data-close-modal>Batal</button>
     <button class="btn btn-primary" id="btn-save-adjust">
       <i data-lucide="save"></i>
       Simpan

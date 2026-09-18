@@ -80,6 +80,13 @@ export function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 }
 
+/** Quote CSV fields and neutralize spreadsheet formulas after leading whitespace. */
+export function csvCell(value) {
+  let text=String(value ?? '');
+  if(/^[\s\uFEFF]*[=+@-]/.test(text)) text="'"+text;
+  return '"'+text.replaceAll('"','""')+'"';
+}
+
 /** Get category badge HTML */
 export function categoryBadge(category) {
   const map = {
@@ -109,6 +116,11 @@ export function businessDate(value) {
   const parts = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(value));
   const values = Object.fromEntries(parts.map(p=>[p.type,p.value]));
   return `${values.year}-${values.month}-${values.day}`;
+}
+/** datetime-local value expressed in the pharmacy's business timezone. */
+export function businessDateTime(value=new Date()) {
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(value)).map(p=>[p.type,p.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 export async function runAction(button, action) {
   if (button.disabled) return;

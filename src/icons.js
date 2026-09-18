@@ -1,8 +1,5 @@
-import { createIcons, icons } from 'lucide';
+import { createIcons, AlertCircle, AlertTriangle, ArrowLeft, BadgeInfo, Banknote, BarChart3, Box, Boxes, Calendar, Check, CheckCircle, Clock, Delete, Download, Edit, Edit2, Edit3, Eye, File, FileText, FormInput, Info, LayoutDashboard, List, LogOut, Menu, Minus, Package, PackageX, PieChart, Pill, Plus, PlusCircle, Printer, QrCode, Receipt, RefreshCw, Save, Search, SearchX, Settings, Settings2, ShoppingBag, ShoppingCart, Sidebar, SidebarOpen, Smartphone, Text, Trash2, TrendingUp, Trophy, Users, Wallet, X } from 'lucide';
 
-// The bundled Lucide API needs the icon registry on every render call.
-export const lucide = {
-  createIcons(options = {}) {
-    return createIcons({ ...options, icons });
-  },
-};
+// Import only the icons used by the application.
+const icons={AlertCircle, AlertTriangle, ArrowLeft, BadgeInfo, Banknote, BarChart3, Box, Boxes, Calendar, Check, CheckCircle, Clock, Delete, Download, Edit, Edit2, Edit3, Eye, File, FileText, FormInput, Info, LayoutDashboard, List, LogOut, Menu, Minus, Package, PackageX, PieChart, Pill, Plus, PlusCircle, Printer, QrCode, Receipt, RefreshCw, Save, Search, SearchX, Settings, Settings2, ShoppingBag, ShoppingCart, Sidebar, SidebarOpen, Smartphone, Text, Trash2, TrendingUp, Trophy, Users, Wallet, X};
+export const lucide={createIcons(options={}) {return createIcons({...options,icons});}};

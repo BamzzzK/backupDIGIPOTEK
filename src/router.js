@@ -17,6 +17,8 @@ export function initRouter(){
   currentPage?.destroy?.();currentPage=null;closeModal();
   document.getElementById('app').innerHTML='<div class="login-page"><p>Memuat data apotek…</p></div>';
   try{
+   if(['/dashboard','/reports'].includes(path) && !window.Chart) window.Chart=(await import('chart.js/auto')).default;
+   if(ticket!==navigation)return;
    if(session?.active)await prepareRoute(path);
    if(ticket!==navigation)return;
    currentPage=await route.handler();

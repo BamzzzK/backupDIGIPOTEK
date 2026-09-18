@@ -8,9 +8,11 @@ let purchaseCache = [];
 let supplierCache = [];
 let appSettings = null;
 let authEpoch = 0;
+let purchaseRead = 0;
+let supplierRead = 0;
 function checked(result) { if (result.error) throw Object.assign(new Error(result.error.message), {code:result.error.code}); return result.data; }
 async function rpc(name, args) { return checked(await supabase.rpc(name, args)); }
-function clearCache() { session = null; inventory = []; transactionCache = []; purchaseCache = []; supplierCache = []; appSettings = null; authEpoch++; }
+function clearCache() { session = null; inventory = []; transactionCache = []; purchaseCache = []; supplierCache = []; appSettings = null; authEpoch++; purchaseRead++; supplierRead++; }
 function normalizeUsername(value) {
   const username = String(value || '').trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) {
@@ -24,9 +26,13 @@ export const auth = {
   isLoggedIn: () => !!session,
   isOwner: () => session?.role === 'owner' && session.active,
   async refresh() {
+    const epoch = authEpoch;
     const { data, error } = await supabase.auth.getUser();
+    if (epoch !== authEpoch) return null;
     if (error || !data.user) { clearCache(); return null; }
     const profile = checked(await supabase.from('staff').select('*').eq('id',data.user.id).single());
+    if (epoch !== authEpoch) return null;
+    if (session && (session.id !== profile.id || session.role !== profile.role || session.active !== profile.active)) clearCache();
     session = { ...profile };
     return session;
   },
@@ -85,7 +91,9 @@ export async function refreshInventory() {
   return next;
 }
 export async function loadSettings() {
+  const epoch=authEpoch;
   const row = checked(await supabase.from('settings').select('*').eq('id',true).single());
+  if(epoch!==authEpoch) return;
   appSettings={pharmacyName:row.pharmacy_name,address:row.address,phone:row.phone,receiptHeader:row.receipt_header,receiptFooter:row.receipt_footer};
 }
 export async function prepareRoute(path) {
@@ -140,6 +148,7 @@ export const transactions = {
    return next;
  },
  async add(trx) {
+   const epoch=authEpoch;
    let id;
    try { id=await rpc('checkout',{request_id:trx.requestId,items:trx.items.map(i=>({productId:i.productId,qty:i.qty,price:i.price})),discount_type:trx.discountType,discount_value:trx.discountValue,payment_method:trx.paymentMethod,amount_paid:Math.round(trx.amountPaid)}); } catch(error) {
      error.rejected = error.code==='P0001' || error.code==='42501' || /^22|^23/.test(error.code||'');
@@ -148,7 +157,7 @@ export const transactions = {
    const result=checked(await supabase.from('sales').select('*,sale_items(*)').eq('id',id).single());
    const saved=mapTransaction(result);
    // Receipt retrieval may fail after commit. Reusing requestId makes retries safe.
-   transactionCache=transactionCache.filter(t=>t.id!==id).concat(saved);
+   if(epoch===authEpoch) transactionCache=transactionCache.filter(t=>t.id!==id).concat(saved);
    return saved;
  },
 };
@@ -159,45 +168,14 @@ export const staff={
 };
 export async function importLegacy(data) {return rpc('import_legacy',{payload:data});}
 
-const DEFAULT_SUPPLIERS = [
-  { id: 'sup-1', name: 'PT Kimia Farma Trading & Distribution', phone: '021-3847709', address: 'Jakarta' },
-  { id: 'sup-2', name: 'PT Anugrah Argon Medica', phone: '021-8990123', address: 'Bekasi' },
-  { id: 'sup-3', name: 'PT Mensa Bina Sukses', phone: '021-4608822', address: 'Jakarta Timur' },
-  { id: 'sup-4', name: 'PT Enseval Putera Megatrading', phone: '021-4609042', address: 'Jakarta Timur' },
-  { id: 'sup-5', name: 'PT Dos Ni Roha', phone: '021-4600022', address: 'Pulo Gadung' },
-];
-
-function loadLocalSuppliers() {
-  try {
-    const raw = localStorage.getItem('dp_suppliers');
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  return DEFAULT_SUPPLIERS;
-}
-
-function saveLocalSuppliers(list) {
-  try {
-    localStorage.setItem('dp_suppliers', JSON.stringify(list));
-  } catch (e) {}
-}
-
-function loadLocalPurchases() {
-  try {
-    const raw = localStorage.getItem('dp_purchases');
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  return [];
-}
-
-function saveLocalPurchases(list) {
-  try {
-    localStorage.setItem('dp_purchases', JSON.stringify(list));
-  } catch (e) {}
-}
-
 function mapPurchaseInvoice(row) {
   return {
     id: row.id,
+    version: row.version,
+    updatedAt: row.updated_at,
+    cancelledAt: row.cancelled_at,
+    cancellationReason: row.cancellation_reason || '',
+    canModifyStock: (row.purchase_items || []).length>0 && (row.purchase_items || []).every(it=>!!it.batch_id),
     invoiceNo: row.invoice_no || row.invoiceNo,
     orderNo: row.order_no || row.orderNo || '',
     supplierId: row.supplier_id || row.supplierId || null,
@@ -226,6 +204,7 @@ function mapPurchaseInvoice(row) {
     createdAt: row.created_at || row.createdAt || new Date().toISOString(),
     items: (row.purchase_items || row.items || []).map((it, idx) => ({
       id: it.id || (idx + 1),
+      batchId: it.batch_id || it.batchId || null,
       productId: it.product_id || it.productId,
       productName: it.product_name || it.productName || 'Produk',
       batchNo: it.batch_no || it.batchNo || '-',
@@ -241,446 +220,136 @@ function mapPurchaseInvoice(row) {
   };
 }
 
+
+function requireOwner() {
+  if (!auth.isOwner()) throw new Error('Akses pemilik diperlukan.');
+}
+function ownerKey(kind) {
+  requireOwner();
+  return `apotek:${supabase.supabaseUrl || 'local'}:${session.id}:${kind}`;
+}
+function validateRange(from, to) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from>to ||
+      !Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to))) throw new Error('Rentang tanggal tidak valid.');
+}
+function readPending() {
+  const raw=sessionStorage.getItem(ownerKey('purchase-command'));
+  if (!raw) return null;
+  try { return JSON.parse(raw); }
+  catch { throw new Error('Data permintaan tertunda tidak terbaca. Periksa faktur sebelum membersihkan penyimpanan tab.'); }
+}
+function rejected(error) {
+  return error.code==='P0001' || error.code==='42501' || error.code==='40001' || /^22|^23/.test(error.code||'');
+}
+let activePurchase=null;
+async function executePurchase(command, key) {
+  const epoch=authEpoch;
+  let row;
+  try { row=await rpc(command.method,command.args); }
+  catch(error) {
+    if(rejected(error)) sessionStorage.removeItem(key);
+    error.rejected=rejected(error);
+    throw error;
+  }
+  sessionStorage.removeItem(key);
+  if(epoch!==authEpoch) throw new Error('Sesi berubah. Masuk kembali untuk melihat hasil faktur.');
+  const saved=mapPurchaseInvoice(row);
+  purchaseRead++; // Invalidate older reads that started before this mutation.
+  purchaseCache=[saved,...purchaseCache.filter(p=>p.id!==saved.id)];
+  try { await refreshInventory(); }
+  catch { saved.inventoryRefreshFailed=true; }
+  return saved;
+}
+async function sendPurchase(method, args) {
+  requireOwner();
+  const key=ownerKey('purchase-command');
+  let command=readPending();
+  const fingerprint=JSON.stringify({method,args});
+  if(command && command.fingerprint!==fingerprint) throw new Error('Ada permintaan pembelian yang belum terkonfirmasi. Selesaikan melalui tombol Periksa permintaan tertunda.');
+  if(!command) {
+    command={method,args:{...args,request_id:crypto.randomUUID()},fingerprint};
+    // Persist before sending: a lost response can safely replay the same command.
+    sessionStorage.setItem(key,JSON.stringify(command));
+  }
+  if(activePurchase?.key===key) return activePurchase.promise;
+  const promise=executePurchase(command,key);
+  activePurchase={key,promise};
+  try { return await promise; }
+  finally { if(activePurchase?.promise===promise) activePurchase=null; }
+}
+
 export const suppliers = {
-  getAll() {
-    if (!supplierCache.length) {
-      supplierCache = loadLocalSuppliers();
-    }
-    return supplierCache;
-  },
+  getAll:()=>auth.isOwner()?supplierCache:[],
   async load() {
-    try {
-      const { data, error } = await supabase.from('suppliers').select('*').order('name');
-      if (!error && data && data.length > 0) {
-        supplierCache = data;
-        return data;
-      }
-    } catch (e) {}
-    return this.getAll();
+    requireOwner();
+    const epoch=authEpoch,ticket=++supplierRead,rows=[];
+    for(let offset=0;;offset+=500) {
+      const page=checked(await supabase.from('suppliers').select('*').order('name').order('id').range(offset,offset+499));
+      rows.push(...page); if(page.length<500) break;
+    }
+    if(epoch!==authEpoch || ticket!==supplierRead) return [];
+    supplierCache=rows; return rows;
   },
   async add(item) {
-    const newSupplier = {
-      id: item.id || ('sup-' + Date.now()),
-      name: (item.name || '').trim(),
-      phone: (item.phone || '').trim(),
-      address: (item.address || '').trim(),
-      createdAt: new Date().toISOString()
-    };
-    try {
-      const { data, error } = await supabase.from('suppliers').insert({
-        name: newSupplier.name,
-        phone: newSupplier.phone,
-        address: newSupplier.address
-      }).select().single();
-      if (!error && data) {
-        newSupplier.id = data.id;
-      }
-    } catch (e) {}
-    supplierCache = [newSupplier, ...supplierCache.filter(s => s.id !== newSupplier.id)];
-    saveLocalSuppliers(supplierCache);
-    return newSupplier;
+    requireOwner();
+    const epoch=authEpoch;
+    const payload={id:item.requestId || crypto.randomUUID(),name:(item.name||'').trim(),phone:(item.phone||'').trim(),address:(item.address||'').trim()};
+    const saved=await rpc('save_supplier',{payload});
+    if(epoch!==authEpoch) throw new Error('Sesi berubah. Masuk kembali untuk melihat supplier.');
+    supplierRead++;
+    supplierCache=[saved,...supplierCache.filter(s=>s.id!==saved.id)];
+    return saved;
   }
 };
 
 export const purchases = {
-  getAll() {
-    if (!purchaseCache.length) {
-      purchaseCache = loadLocalPurchases();
-    }
-    return purchaseCache;
+  getAll:()=>auth.isOwner()?purchaseCache:[],
+  getById(id) { return this.getAll().find(p=>p.id===id); },
+  getByDateRange(from,to) { return this.getAll().filter(p=>p.invoiceDate>=from && p.invoiceDate<=to); },
+  pending() { return auth.isOwner()?readPending():null; },
+  async retryPending() {
+    requireOwner();
+    const command=readPending();
+    if(!command) throw new Error('Tidak ada permintaan tertunda.');
+    const {request_id,...args}=command.args;
+    return sendPurchase(command.method,args);
   },
-  getById(id) {
-    const list = this.getAll();
-    return list.find(p => p.id === id || p.invoiceNo === id);
-  },
-  getByDateRange(from, to) {
-    const list = this.getAll();
-    return list.filter(p => {
-      const d = p.invoiceDate || businessDate(p.createdAt);
-      return d >= from && d <= to;
+  hasLegacyLocalData() {
+    if(!auth.isOwner()) return false;
+    return ['dp_purchases','dp_suppliers'].some(key=> {
+      const raw=localStorage.getItem(key);
+      return raw && raw!=='[]';
     });
   },
-  async loadRange(from, to) {
-    try {
-      const start = new Date(`${from}T00:00:00+07:00`).toISOString();
-      const end = new Date(new Date(`${to}T00:00:00+07:00`).getTime() + 86400000).toISOString();
-      const { data, error } = await supabase
-        .from('purchase_invoices')
-        .select('*,purchase_items(*)')
-        .gte('created_at', start)
-        .lt('created_at', end)
-        .order('created_at', { ascending: false });
-      if (!error && data) {
-        const mapped = data.map(mapPurchaseInvoice);
-        const local = loadLocalPurchases();
-        const combined = [...mapped];
-        for (const loc of local) {
-          if (!combined.some(c => c.id === loc.id || c.invoiceNo === loc.invoiceNo)) {
-            combined.push(loc);
-          }
-        }
-        purchaseCache = combined;
-        return this.getByDateRange(from, to);
-      }
-    } catch (e) {}
-    return this.getByDateRange(from, to);
+  exportLegacy() {
+    requireOwner();
+    // Preserve the exact old content, including malformed JSON; never silently import it.
+    return {exportedAt:new Date().toISOString(),purchases:localStorage.getItem('dp_purchases'),suppliers:localStorage.getItem('dp_suppliers')};
   },
-  async add(invoiceData) {
-    if (!invoiceData.invoiceNo || !invoiceData.invoiceNo.trim()) {
-      throw new Error('Nomor faktur wajib diisi.');
+  async loadRange(from,to) {
+    requireOwner(); validateRange(from,to);
+    const epoch=authEpoch,ticket=++purchaseRead,rows=[];
+    for(let offset=0;;offset+=500) {
+      const page=checked(await supabase.from('purchase_invoices').select('*,purchase_items(*)')
+        .gte('invoice_date',from).lte('invoice_date',to)
+        .order('invoice_date',{ascending:false}).order('id').range(offset,offset+499));
+      rows.push(...page); if(page.length<500) break;
     }
-    if (!invoiceData.items || invoiceData.items.length === 0) {
-      throw new Error('Faktur harus memiliki minimal satu item produk.');
-    }
-
-    // 1. Process batch stock additions for each product
-    for (const item of invoiceData.items) {
-      if (item.productId && item.qty > 0) {
-        try {
-          await rpc('change_stock', {
-            product_id: item.productId,
-            mode: 'add',
-            quantity: Number(item.qty),
-            batch_no: item.batchNo || '-',
-            expiry: item.expiry || null,
-            note: 'Faktur: ' + (invoiceData.invoiceNo || '-')
-          });
-        } catch (stockErr) {
-          const prod = inventory.find(p => p.id === item.productId);
-          if (prod) {
-            prod.stock = (prod.stock || 0) + Number(item.qty);
-            prod.availableStock = (prod.availableStock || 0) + Number(item.qty);
-            prod.batches = prod.batches || [];
-            prod.batches.push({
-              id: 'batch-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-              batchNo: item.batchNo || '-',
-              expiry: item.expiry || null,
-              qty: Number(item.qty),
-              addedAt: new Date().toISOString()
-            });
-          }
-        }
-
-        // Update product buy_price if new buy price is given
-        if (item.buyPrice && item.buyPrice > 0) {
-          const currentProd = products.getById(item.productId);
-          if (currentProd && currentProd.buyPrice !== Number(item.buyPrice)) {
-            try {
-              await products.update(item.productId, {
-                name: currentProd.name,
-                category: currentProd.category,
-                unit: currentProd.unit,
-                buyPrice: Number(item.buyPrice),
-                sellPrice: currentProd.sellPrice,
-                minStock: currentProd.minStock,
-              });
-            } catch (updErr) {
-              if (currentProd) currentProd.buyPrice = Number(item.buyPrice);
-            }
-          }
-        }
-      }
-    }
-    await refreshInventory().catch(() => {});
-
-    // 2. Prepare saved invoice object
-    const saved = {
-      id: invoiceData.id || ('pi-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)),
-      invoiceNo: invoiceData.invoiceNo.trim(),
-      orderNo: (invoiceData.orderNo || '').trim(),
-      supplierId: invoiceData.supplierId || null,
-      supplierName: invoiceData.supplierName || 'Umum',
-      officerId: session?.id || null,
-      officerName: session?.name || invoiceData.officerName || 'Petugas',
-      invoiceDate: invoiceData.invoiceDate || today(),
-      receivedAt: invoiceData.receivedAt || new Date().toISOString(),
-      invoiceType: invoiceData.invoiceType || 'exclude_tax',
-      warehouse: invoiceData.warehouse || 'Gudang Utama',
-      paymentType: invoiceData.paymentType || 'kredit',
-      paymentTerm: Number(invoiceData.paymentTerm || 0),
-      dueDate: invoiceData.dueDate || today(),
-      subtotal: Number(invoiceData.subtotal || 0),
-      discountType: invoiceData.discountType || 'nominal',
-      discountValue: Number(invoiceData.discountValue || 0),
-      discountAmount: Number(invoiceData.discountAmount || 0),
-      cashback: Number(invoiceData.cashback || 0),
-      otherFees: Number(invoiceData.otherFees || 0),
-      taxPercent: Number(invoiceData.taxPercent || 0),
-      taxAmount: Number(invoiceData.taxAmount || 0),
-      total: Number(invoiceData.total || 0),
-      notes: invoiceData.notes || '',
-      pkpStatus: invoiceData.pkpStatus || 'non_pkp',
-      status: invoiceData.status || 'completed',
-      createdAt: new Date().toISOString(),
-      items: (invoiceData.items || []).map((item, idx) => ({
-        id: item.id || (idx + 1),
-        productId: item.productId,
-        productName: item.productName,
-        batchNo: item.batchNo || '-',
-        expiry: item.expiry || null,
-        qty: Number(item.qty),
-        unit: item.unit || 'pcs',
-        buyPrice: Number(item.buyPrice || 0),
-        discountPercent: Number(item.discountPercent || 0),
-        taxPercent: Number(item.taxPercent || 0),
-        costPrice: Number(item.costPrice || item.buyPrice || 0),
-        subtotal: Number(item.subtotal || 0)
-      }))
-    };
-
-    // 3. Try to persist to Supabase
-    try {
-      const { data: invRow, error: invErr } = await supabase.from('purchase_invoices').insert({
-        invoice_no: saved.invoiceNo,
-        order_no: saved.orderNo,
-        supplier_id: saved.supplierId,
-        supplier_name: saved.supplierName,
-        officer_id: saved.officerId,
-        officer_name: saved.officerName,
-        invoice_date: saved.invoiceDate,
-        received_at: saved.receivedAt,
-        invoice_type: saved.invoiceType,
-        warehouse: saved.warehouse,
-        payment_type: saved.paymentType,
-        payment_term: saved.paymentTerm,
-        due_date: saved.dueDate,
-        subtotal: saved.subtotal,
-        discount_type: saved.discountType,
-        discount_value: saved.discountValue,
-        discount_amount: saved.discountAmount,
-        cashback: saved.cashback,
-        other_fees: saved.otherFees,
-        tax_percent: saved.taxPercent,
-        tax_amount: saved.taxAmount,
-        total: saved.total,
-        notes: saved.notes,
-        pkp_status: saved.pkpStatus,
-        status: saved.status
-      }).select().single();
-
-      if (!invErr && invRow) {
-        saved.id = invRow.id;
-        const itemRows = saved.items.map(it => ({
-          invoice_id: invRow.id,
-          product_id: it.productId,
-          product_name: it.productName,
-          batch_no: it.batchNo,
-          expiry: it.expiry,
-          qty: it.qty,
-          unit: it.unit,
-          buy_price: it.buyPrice,
-          discount_percent: it.discountPercent,
-          tax_percent: it.taxPercent,
-          cost_price: it.costPrice,
-          subtotal: it.subtotal
-        }));
-        await supabase.from('purchase_items').insert(itemRows);
-      }
-    } catch (e) {}
-
-    purchaseCache = [saved, ...purchaseCache.filter(p => p.id !== saved.id)];
-    saveLocalPurchases(purchaseCache);
-    return saved;
+    if(epoch!==authEpoch || ticket!==purchaseRead) return [];
+    purchaseCache=rows.map(row=>mapPurchaseInvoice({...row,purchase_items:[...(row.purchase_items||[])].sort((a,b)=>a.id-b.id)}));
+    return this.getByDateRange(from,to);
   },
-  async update(id, invoiceData) {
-    const existing = this.getById(id);
-    if (!existing) throw new Error('Faktur tidak ditemukan.');
-
-    // Adjust stock differences between old and new items
-    const oldItemsMap = new Map();
-    (existing.items || []).forEach(it => {
-      oldItemsMap.set(it.productId, (oldItemsMap.get(it.productId) || 0) + Number(it.qty));
-    });
-
-    const newItemsMap = new Map();
-    (invoiceData.items || []).forEach(it => {
-      newItemsMap.set(it.productId, (newItemsMap.get(it.productId) || 0) + Number(it.qty));
-    });
-
-    // Handle products in new items
-    for (const [prodId, newQty] of newItemsMap.entries()) {
-      const oldQty = oldItemsMap.get(prodId) || 0;
-      const delta = newQty - oldQty;
-      if (delta > 0) {
-        const item = invoiceData.items.find(i => i.productId === prodId);
-        try {
-          await rpc('change_stock', {
-            product_id: prodId,
-            mode: 'add',
-            quantity: delta,
-            batch_no: item?.batchNo || '-',
-            expiry: item?.expiry || null,
-            note: 'Revisi Faktur: ' + (invoiceData.invoiceNo || existing.invoiceNo)
-          });
-        } catch (e) {
-          const prod = inventory.find(p => p.id === prodId);
-          if (prod) {
-            prod.stock = (prod.stock || 0) + delta;
-            prod.availableStock = (prod.availableStock || 0) + delta;
-          }
-        }
-      } else if (delta < 0) {
-        try {
-          await rpc('change_stock', {
-            product_id: prodId,
-            mode: 'subtract',
-            quantity: Math.abs(delta),
-            note: 'Revisi Pengurangan Faktur: ' + (invoiceData.invoiceNo || existing.invoiceNo)
-          });
-        } catch (e) {
-          const prod = inventory.find(p => p.id === prodId);
-          if (prod) {
-            prod.stock = Math.max(0, (prod.stock || 0) + delta);
-            prod.availableStock = Math.max(0, (prod.availableStock || 0) + delta);
-          }
-        }
-      }
-    }
-
-    // Handle removed products completely
-    for (const [prodId, oldQty] of oldItemsMap.entries()) {
-      if (!newItemsMap.has(prodId) && oldQty > 0) {
-        try {
-          await rpc('change_stock', {
-            product_id: prodId,
-            mode: 'subtract',
-            quantity: oldQty,
-            note: 'Hapus Item Faktur: ' + existing.invoiceNo
-          });
-        } catch (e) {
-          const prod = inventory.find(p => p.id === prodId);
-          if (prod) {
-            prod.stock = Math.max(0, (prod.stock || 0) - oldQty);
-            prod.availableStock = Math.max(0, (prod.availableStock || 0) - oldQty);
-          }
-        }
-      }
-    }
-
-    await refreshInventory().catch(() => {});
-
-    const updated = {
-      ...existing,
-      invoiceNo: (invoiceData.invoiceNo || existing.invoiceNo).trim(),
-      orderNo: (invoiceData.orderNo ?? existing.orderNo).trim(),
-      supplierId: invoiceData.supplierId ?? existing.supplierId,
-      supplierName: invoiceData.supplierName || existing.supplierName,
-      invoiceDate: invoiceData.invoiceDate || existing.invoiceDate,
-      receivedAt: invoiceData.receivedAt || existing.receivedAt,
-      invoiceType: invoiceData.invoiceType || existing.invoiceType,
-      warehouse: invoiceData.warehouse || existing.warehouse,
-      paymentType: invoiceData.paymentType || existing.paymentType,
-      paymentTerm: Number(invoiceData.paymentTerm ?? existing.paymentTerm ?? 0),
-      dueDate: invoiceData.dueDate || existing.dueDate,
-      subtotal: Number(invoiceData.subtotal ?? existing.subtotal ?? 0),
-      discountType: invoiceData.discountType || existing.discountType,
-      discountValue: Number(invoiceData.discountValue ?? existing.discountValue ?? 0),
-      discountAmount: Number(invoiceData.discountAmount ?? existing.discountAmount ?? 0),
-      cashback: Number(invoiceData.cashback ?? existing.cashback ?? 0),
-      otherFees: Number(invoiceData.otherFees ?? existing.otherFees ?? 0),
-      taxPercent: Number(invoiceData.taxPercent ?? existing.taxPercent ?? 0),
-      taxAmount: Number(invoiceData.taxAmount ?? existing.taxAmount ?? 0),
-      total: Number(invoiceData.total ?? existing.total ?? 0),
-      notes: invoiceData.notes ?? existing.notes ?? '',
-      pkpStatus: invoiceData.pkpStatus || existing.pkpStatus,
-      updatedAt: new Date().toISOString(),
-      items: (invoiceData.items || []).map((item, idx) => ({
-        id: item.id || (idx + 1),
-        productId: item.productId,
-        productName: item.productName,
-        batchNo: item.batchNo || '-',
-        expiry: item.expiry || null,
-        qty: Number(item.qty),
-        unit: item.unit || 'pcs',
-        buyPrice: Number(item.buyPrice || 0),
-        discountPercent: Number(item.discountPercent || 0),
-        taxPercent: Number(item.taxPercent || 0),
-        costPrice: Number(item.costPrice || item.buyPrice || 0),
-        subtotal: Number(item.subtotal || 0)
-      }))
-    };
-
-    try {
-      await supabase.from('purchase_invoices').update({
-        invoice_no: updated.invoiceNo,
-        order_no: updated.orderNo,
-        supplier_id: updated.supplierId,
-        supplier_name: updated.supplierName,
-        invoice_date: updated.invoiceDate,
-        received_at: updated.receivedAt,
-        invoice_type: updated.invoiceType,
-        warehouse: updated.warehouse,
-        payment_type: updated.paymentType,
-        payment_term: updated.paymentTerm,
-        due_date: updated.dueDate,
-        subtotal: updated.subtotal,
-        discount_type: updated.discountType,
-        discount_value: updated.discountValue,
-        discount_amount: updated.discountAmount,
-        cashback: updated.cashback,
-        other_fees: updated.otherFees,
-        tax_percent: updated.taxPercent,
-        tax_amount: updated.taxAmount,
-        total: updated.total,
-        notes: updated.notes,
-        pkp_status: updated.pkpStatus
-      }).eq('id', updated.id);
-
-      await supabase.from('purchase_items').delete().eq('invoice_id', updated.id);
-      const itemRows = updated.items.map(it => ({
-        invoice_id: updated.id,
-        product_id: it.productId,
-        product_name: it.productName,
-        batch_no: it.batchNo,
-        expiry: it.expiry,
-        qty: it.qty,
-        unit: it.unit,
-        buy_price: it.buyPrice,
-        discount_percent: it.discountPercent,
-        tax_percent: it.taxPercent,
-        cost_price: it.costPrice,
-        subtotal: it.subtotal
-      }));
-      await supabase.from('purchase_items').insert(itemRows);
-    } catch (e) {}
-
-    purchaseCache = purchaseCache.map(p => (p.id === updated.id ? updated : p));
-    saveLocalPurchases(purchaseCache);
-    return updated;
+  async add(payload) {
+    return sendPurchase('save_purchase',{invoice_id:null,expected_version:null,payload});
   },
-  async remove(id) {
-    const existing = this.getById(id);
-    if (!existing) return;
-
-    // Deduct previously added stock
-    for (const item of (existing.items || [])) {
-      if (item.productId && item.qty > 0) {
-        try {
-          await rpc('change_stock', {
-            product_id: item.productId,
-            mode: 'subtract',
-            quantity: Number(item.qty),
-            note: 'Pembatalan Faktur: ' + existing.invoiceNo
-          });
-        } catch (e) {
-          const prod = inventory.find(p => p.id === item.productId);
-          if (prod) {
-            prod.stock = Math.max(0, (prod.stock || 0) - Number(item.qty));
-            prod.availableStock = Math.max(0, (prod.availableStock || 0) - Number(item.qty));
-          }
-        }
-      }
-    }
-    await refreshInventory().catch(() => {});
-
-    // Delete from Supabase
-    try {
-      await supabase.from('purchase_items').delete().eq('invoice_id', existing.id);
-      await supabase.from('purchase_invoices').delete().eq('id', existing.id);
-    } catch (e) {}
-
-    // Delete from local cache
-    purchaseCache = purchaseCache.filter(p => p.id !== existing.id && p.invoiceNo !== existing.invoiceNo);
-    saveLocalPurchases(purchaseCache);
+  async update(id,payload,version) {
+    const existing=this.getById(id);
+    if(!existing) throw new Error('Faktur belum dimuat. Segarkan daftar terlebih dahulu.');
+    return sendPurchase('save_purchase',{invoice_id:id,expected_version:version ?? existing.version,payload});
+  },
+  async remove(id,reason='Dibatalkan oleh pemilik',version) {
+    const existing=this.getById(id);
+    if(!existing) throw new Error('Faktur belum dimuat. Segarkan daftar terlebih dahulu.');
+    return sendPurchase('cancel_purchase',{invoice_id:id,expected_version:version ?? existing.version,reason});
   }
 };

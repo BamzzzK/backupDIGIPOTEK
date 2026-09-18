@@ -218,7 +218,7 @@ function showProductForm(editId = null) {
   `;
 
   const footer = `
-    <button class="btn btn-secondary" onclick="document.getElementById('modal-close-btn').click()">Batal</button>
+    <button class="btn btn-secondary" data-close-modal>Batal</button>
     <button class="btn btn-primary" id="btn-save-product">
       <i data-lucide="save"></i>
       ${product ? 'Simpan Perubahan' : 'Tambah Produk'}
@@ -254,6 +254,7 @@ function showProductForm(editId = null) {
     } else {
       const batchNo = document.getElementById('pf-batch')?.value.trim() || generateBatchNo();
       const expiry = document.getElementById('pf-expiry')?.value || null;
+      if(stock>0 && category==='obat' && !expiry) throw new Error('Tanggal kedaluwarsa obat wajib diisi untuk stok awal.');
       data.batchNo = batchNo;
       data.expiry = expiry;
       data.batches = [];
@@ -294,7 +295,7 @@ function showAddStockModal(productId) {
   `;
 
   const footer = `
-    <button class="btn btn-secondary" onclick="document.getElementById('modal-close-btn').click()">Batal</button>
+    <button class="btn btn-secondary" data-close-modal>Batal</button>
     <button class="btn btn-primary" id="btn-save-stock">
       <i data-lucide="plus-circle"></i>
       Tambah Stok
@@ -333,7 +334,7 @@ function deleteProduct(id) {
   `;
 
   const footer = `
-    <button class="btn btn-secondary" onclick="document.getElementById('modal-close-btn').click()">Batal</button>
+    <button class="btn btn-secondary" data-close-modal>Batal</button>
     <button class="btn btn-danger" id="btn-confirm-delete">
       <i data-lucide="trash-2"></i>
       Hapus
@@ -374,4 +375,3 @@ function bindProductsEvents() {
   // Add product button
   document.getElementById('btn-add-product').addEventListener('click', () => showProductForm());
 }
-

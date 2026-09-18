@@ -4,16 +4,16 @@ import { renderSidebar } from '../components/sidebar.js';
 import { renderHeader, bindHeaderEvents } from '../components/header.js';
 import { showModal } from '../components/modal.js';
 import { transactions } from '../store.js';
-import { businessDate, formatRupiah, formatDateTime, today, daysAgo, escapeHtml } from '../utils.js';
+import { businessDate, formatRupiah, formatDateTime, today, daysAgo, escapeHtml, csvCell } from '../utils.js';
 
-let dateFrom = daysAgo(7);
+let dateFrom = daysAgo(6);
 let dateTo = today();
 let activePreset = '7d';
 let reportRequest=0;
 let displayedTransactions=[];
 
 export function renderReports() {
-  dateFrom = daysAgo(7);
+  dateFrom = daysAgo(6);
   dateTo = today();
   activePreset = '7d';
 
@@ -289,7 +289,7 @@ function renderTable(trxs) {
               <td><strong>${formatRupiah(t.total)}</strong></td>
               <td style="color:var(--success);font-weight:600">${formatRupiah(t.margin || 0)}</td>
               <td><span class="badge ${methodBadge}">${t.paymentMethod.toUpperCase()}</span></td>
-              <td>${t.cashier || '-'}</td>
+              <td>${escapeHtml(t.cashier || '-')}</td>
               <td>
                 <button class="btn btn-sm btn-secondary" data-action="view-trx" data-id="${t.id}">
                   <i data-lucide="eye"></i>
@@ -320,7 +320,7 @@ function renderTable(trxs) {
             </div>
             <div style="padding:12px;background:var(--bg-alt);border-radius:var(--radius)">
               <div style="font-size:0.8rem;color:var(--text-muted)">Kasir</div>
-              <strong>${trx.cashier}</strong>
+              <strong>${escapeHtml(trx.cashier)}</strong>
             </div>
           </div>
           <div class="table-container">
@@ -367,7 +367,7 @@ function exportCSV(trxs) {
     ]);
   });
 
-  const csv = rows.map(r => r.map(c => `"${String(c).replace(/^[=+@-]/, "'" + String(c)[0]).replaceAll('"', '""')}"`).join(',')).join('\n');
+  const csv = rows.map(r => r.map(csvCell).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -390,10 +390,10 @@ function bindReportEvents() {
       dateFrom = today();
       dateTo = today();
     } else if (activePreset === '7d') {
-      dateFrom = daysAgo(7);
+      dateFrom = daysAgo(6);
       dateTo = today();
     } else if (activePreset === '30d') {
-      dateFrom = daysAgo(30);
+      dateFrom = daysAgo(29);
       dateTo = today();
     }
 
@@ -415,4 +415,3 @@ function bindReportEvents() {
     exportCSV(displayedTransactions);
   });
 }
-

@@ -18,7 +18,7 @@ let purchaseInvoices = [];
 let supplierList = [
   { id: 's1', name: 'PT Kimia Farma', phone: '021-1234', address: 'Jakarta' }
 ];
-let controller;
+let controller,loadedRanges;
 const identity = { id: 'test-owner', name: 'Owner Apotek', role: 'owner', active: true };
 
 const productStore = {
@@ -42,7 +42,7 @@ const purchasesStore = {
   getAll: () => purchaseInvoices,
   getById: (id) => purchaseInvoices.find(p => p.id === id || p.invoiceNo === id),
   getByDateRange: (from, to) => purchaseInvoices,
-  loadRange: async () => purchaseInvoices,
+  loadRange: async (from,to) => {loadedRanges.push([from,to]);return purchaseInvoices;},
   add: async (inv) => {
     const saved = { ...inv, id: 'inv-' + Date.now(), createdAt: new Date().toISOString() };
     for (const item of inv.items) {
@@ -74,7 +74,7 @@ const purchasesStore = {
           product.stock -= it.qty;
         }
       }
-      purchaseInvoices = purchaseInvoices.filter(p => p.id !== id);
+      inv.status='cancelled';
     }
   }
 };
@@ -116,6 +116,7 @@ beforeEach(() => {
   document.body.innerHTML = '<div id="app"></div><div id="toast-container"></div><div id="modal-container"></div>';
   sessionStorage.clear();
   purchaseInvoices = [];
+  loadedRanges = [];
   product = {
     id: 'p1',
     name: 'Paracetamol 500mg',
@@ -230,7 +231,7 @@ test('purchases edit invoice updates details and adjusts stock', async () => {
   assert.match(document.getElementById('purchase-page-content').textContent, /FAK-EDIT-001/);
 });
 
-test('purchases delete invoice removes from list and reverts stock', async () => {
+test('purchases cancellation retains history and reverts stock', async () => {
   purchaseInvoices = [{
     id: 'inv-del-1',
     invoiceNo: 'FAK-DEL-001',
@@ -258,11 +259,34 @@ test('purchases delete invoice removes from list and reverts stock', async () =>
   // Confirmation modal should open
   const confirmBtn = document.getElementById('btn-confirm-del');
   assert.ok(confirmBtn);
+  document.getElementById('cancel-purchase-reason').value='Salah input';
   confirmBtn.click();
   await settle();
 
-  // Invoice deleted and stock reverted: 15 - 5 = 10
-  assert.equal(purchaseInvoices.length, 0);
+  // Invoice history retained and stock reverted: 15 - 5 = 10
+  assert.equal(purchaseInvoices.length, 1);
+  assert.equal(purchaseInvoices[0].status, 'cancelled');
   assert.equal(product.stock, 10);
-  assert.match(document.getElementById('purchase-page-content').textContent, /Data faktur tidak ditemukan/);
+  assert.match(document.getElementById('purchase-page-content').textContent, /Dibatalkan/);
+});
+
+test('purchase date filter fetches the selected range from server',async()=>{
+  controller=renderPurchases('list');
+  document.getElementById('filter-start-date').value='2025-01-01';
+  document.getElementById('filter-end-date').value='2025-02-01';
+  document.getElementById('btn-apply-date-filter').click();await settle();
+  assert.deepEqual(loadedRanges,[['2025-01-01','2025-02-01']]);
+});
+
+test('double cancellation click sends one request while the first is pending',async()=>{
+  purchaseInvoices=[{id:'double',version:2,invoiceNo:'ONCE',invoiceDate:'2026-09-18',supplierName:'Umum',items:[],total:0}];
+  const original=purchasesStore.remove;let count=0,resolve;
+  purchasesStore.remove=async()=>{count++;await new Promise(r=>{resolve=r;});};
+  try {
+    controller=renderPurchases('list');document.querySelector('.btn-delete-invoice').click();
+    document.getElementById('cancel-purchase-reason').value='Salah input';
+    const button=document.getElementById('btn-confirm-del');button.click();button.click();
+    assert.equal(button.disabled,true);assert.equal(count,1);
+    resolve();await settle();
+  } finally {purchasesStore.remove=original;}
 });

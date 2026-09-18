@@ -380,7 +380,7 @@ function showPaymentModal() {
   `;
 
   const footer = `
-    <button class="btn btn-secondary" onclick="document.getElementById('modal-close-btn').click()">Batal</button>
+    <button class="btn btn-secondary" data-close-modal>Batal</button>
     <button class="btn btn-primary" id="btn-confirm-pay">
       <i data-lucide="check"></i>
       Konfirmasi Pembayaran
@@ -508,7 +508,7 @@ function showReceipt(trx) {
   `;
 
   const footer = `
-    <button class="btn btn-secondary" onclick="document.getElementById('modal-close-btn').click()">Tutup</button>
+    <button class="btn btn-secondary" data-close-modal>Tutup</button>
     <button class="btn btn-primary" id="btn-print-receipt">
       <i data-lucide="printer"></i>
       Cetak Struk

@@ -11,7 +11,9 @@ import {
   formatDate,
   today,
   businessDate,
-  generateBatchNo
+  generateBatchNo,
+  businessDateTime,
+  runAction
 } from '../utils.js';
 
 let activeView = 'list'; // 'list' | 'create'
@@ -19,9 +21,13 @@ let searchQuery = '';
 let filterStartDate = '';
 let filterEndDate = '';
 let currentInvoiceData = null;
+let pageEpoch = 0;
+let rangeRequest = 0;
 
 export function renderPurchases(subAction = 'list') {
+  pageEpoch++;
   activeView = subAction === 'new' ? 'create' : 'list';
+  resetFormState();
   searchQuery = '';
 
   // Default date filter: 30 days ago until today
@@ -36,6 +42,7 @@ export function renderPurchases(subAction = 'list') {
       ${renderSidebar()}
       <div class="main-content">
         ${renderHeader('Faktur Pembelian', 'Kelola penerimaan barang dan faktur pembelian dari supplier')}
+        <div id="purchase-notices" aria-live="polite"></div>
         <div class="page-content" id="purchase-page-content">
           ${activeView === 'create' ? renderCreateView() : renderListView()}
         </div>
@@ -45,6 +52,7 @@ export function renderPurchases(subAction = 'list') {
 
   if (window.lucide) lucide.createIcons();
   bindHeaderEvents();
+  renderPurchaseNotices();
 
   if (activeView === 'create') {
     initCreateViewEvents();
@@ -54,12 +62,44 @@ export function renderPurchases(subAction = 'list') {
 
   return {
     destroy() {
+      pageEpoch++;
+      rangeRequest++;
+      resetFormState();
       currentInvoiceData = null;
     }
   };
 }
 
 // ===== 1. LIST VIEW =====
+
+function renderPurchaseNotices() {
+  const target=document.getElementById('purchase-notices');
+  if(!target) return;
+  const pending=purchases.pending?.();
+  const legacy=purchases.hasLegacyLocalData?.();
+  target.innerHTML=`${pending ? `<div class="card" style="margin:16px 24px;padding:16px"><p>Permintaan faktur ${escapeHtml(pending.args.payload?.invoiceNo || '')} belum terkonfirmasi. Periksa kembali dengan permintaan yang sama.</p><button id="retry-purchase-command" class="btn btn-primary">Periksa permintaan tertunda</button></div>` : ''}
+    ${legacy ? '<div class="card" style="margin:16px 24px;padding:16px"><p>Browser ini menyimpan data pembelian versi lama. Unduh untuk pencocokan dengan data server.</p><button id="export-old-purchases" class="btn btn-secondary">Unduh data pembelian lama</button></div>' : ''}`;
+  const retry=document.getElementById('retry-purchase-command');
+  if(retry) retry.onclick=e=>runAction(e.currentTarget,async()=>{
+    const epoch=pageEpoch;
+    try {
+      const saved=await purchases.retryPending();
+      if(epoch!==pageEpoch) return;
+      resetFormState();activeView='list';
+      document.getElementById('purchase-page-content').innerHTML=renderListView();
+      initListViewEvents();
+      if(window.lucide) lucide.createIcons();
+      showToast(`Faktur ${saved.invoiceNo} sudah terkonfirmasi.`, 'success');
+      if(saved.inventoryRefreshFailed) showToast('Faktur tersimpan; segarkan tampilan stok saat koneksi pulih.','warning');
+    } finally { if(epoch===pageEpoch) renderPurchaseNotices(); }
+  });
+  const exportButton=document.getElementById('export-old-purchases');
+  if(exportButton) exportButton.onclick=()=>{
+    const url=URL.createObjectURL(new Blob([JSON.stringify(purchases.exportLegacy(),null,2)],{type:'application/json'}));
+    const a=document.createElement('a');a.href=url;a.download='apotek-pembelian-browser-lama.json';a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  };
+}
 
 function renderListView() {
   const allInvoices = purchases.getByDateRange(filterStartDate, filterEndDate);
@@ -74,7 +114,7 @@ function renderListView() {
     );
   });
 
-  const grandTotalSum = filtered.reduce((acc, inv) => acc + (inv.total || 0), 0);
+  const grandTotalSum = filtered.reduce((acc, inv) => acc + (inv.status==='cancelled' ? 0 : (inv.total || 0)), 0);
   const totalCount = filtered.length;
 
   return `
@@ -170,6 +210,7 @@ function renderTableContent(items) {
         </td>
         <td>
           <strong>${escapeHtml(inv.invoiceNo)}</strong>
+          ${inv.status==='cancelled' ? '<span class="badge badge-danger">Dibatalkan</span>' : ''}
           ${inv.orderNo ? `<div style="font-size:11px;color:var(--text-muted)">SP: ${escapeHtml(inv.orderNo)}</div>` : ''}
         </td>
         <td>
@@ -188,10 +229,10 @@ function renderTableContent(items) {
             <button class="btn btn-sm btn-secondary btn-icon-only btn-view-invoice" data-id="${inv.id}" title="Lihat Rincian Faktur" aria-label="Lihat Rincian Faktur">
               <i data-lucide="eye"></i>
             </button>
-            <button class="btn btn-sm btn-secondary btn-icon-only btn-edit-invoice" data-id="${inv.id}" title="Edit Faktur" aria-label="Edit Faktur">
+            <button class="btn btn-sm btn-secondary btn-icon-only btn-edit-invoice" data-id="${inv.id}" title="Edit Faktur" aria-label="Edit Faktur" ${inv.status==='cancelled' ? 'disabled' : ''}>
               <i data-lucide="edit-3"></i>
             </button>
-            <button class="btn btn-sm btn-secondary btn-icon-only btn-delete-invoice" data-id="${inv.id}" title="Batalkan Faktur" aria-label="Batalkan Faktur" style="color:var(--danger)">
+            <button class="btn btn-sm btn-secondary btn-icon-only btn-delete-invoice" data-id="${inv.id}" title="Batalkan Faktur" aria-label="Batalkan Faktur" style="color:var(--danger)" ${inv.status==='cancelled' || inv.canModifyStock===false ? 'disabled' : ''}>
               <i data-lucide="trash-2"></i>
             </button>
           </div>
@@ -268,7 +309,7 @@ function initListViewEvents() {
 
   const btnFilter = document.getElementById('btn-apply-date-filter');
   if (btnFilter) {
-    btnFilter.onclick = () => {
+    btnFilter.onclick = (event) => runAction(event.currentTarget,async () => {
       const s = document.getElementById('filter-start-date').value;
       const e = document.getElementById('filter-end-date').value;
       if (s && e) {
@@ -276,20 +317,25 @@ function initListViewEvents() {
           showToast('Tanggal awal tidak boleh melebihi tanggal akhir.', 'error');
           return;
         }
+        const epoch=pageEpoch,ticket=++rangeRequest;
+        await purchases.loadRange(s,e);
+        if(epoch!==pageEpoch || ticket!==rangeRequest || activeView!=='list') return;
         filterStartDate = s;
         filterEndDate = e;
         content.innerHTML = renderListView();
         if (window.lucide) lucide.createIcons();
         initListViewEvents();
       }
-    };
+    });
   }
 
   const btnRefresh = document.getElementById('btn-refresh-purchases');
   if (btnRefresh) {
-    btnRefresh.onclick = async () => {
+    btnRefresh.onclick = (event) => runAction(event.currentTarget,async () => {
+      const epoch=pageEpoch,ticket=++rangeRequest;
       try {
         await purchases.loadRange(filterStartDate, filterEndDate);
+        if(epoch!==pageEpoch || ticket!==rangeRequest || activeView!=='list') return;
         content.innerHTML = renderListView();
         if (window.lucide) lucide.createIcons();
         initListViewEvents();
@@ -297,7 +343,7 @@ function initListViewEvents() {
       } catch (err) {
         showToast('Gagal memuat data: ' + err.message, 'error');
       }
-    };
+    });
   }
 
   bindViewDetailButtons();
@@ -327,12 +373,13 @@ function bindViewDetailButtons() {
       if (invoice) {
         formState = {
           editingId: invoice.id,
+          version: invoice.version,
           supplierId: invoice.supplierId || '',
           supplierName: invoice.supplierName || '',
           orderNo: invoice.orderNo || '',
           invoiceNo: invoice.invoiceNo || '',
           invoiceDate: invoice.invoiceDate || today(),
-          receivedAt: invoice.receivedAt ? invoice.receivedAt.slice(0, 16) : new Date().toISOString().slice(0, 16),
+          receivedAt: businessDateTime(invoice.receivedAt || new Date()),
           invoiceType: invoice.invoiceType || 'exclude_tax',
           warehouse: invoice.warehouse || 'Gudang Utama',
           paymentType: invoice.paymentType || 'kredit',
@@ -377,8 +424,10 @@ function showDeleteInvoiceModal(inv) {
         Apakah Anda yakin ingin membatalkan/menghapus faktur <strong>${escapeHtml(inv.invoiceNo)}</strong> dari <strong>${escapeHtml(inv.supplierName || 'Supplier')}</strong>?
       </p>
       <div style="background:var(--danger-light);color:var(--danger-hover);padding:12px;border-radius:var(--radius);font-size:12px;margin-bottom:16px">
-        <strong>Perhatian:</strong> Seluruh kuantitas obat dari faktur ini (${(inv.items || []).length} jenis produk) akan otomatis dikurangi kembali dari stok inventori apotek.
+        Stok dikembalikan hanya dari batch faktur ini. Pembatalan ditolak jika batch sudah terjual atau disesuaikan. Riwayat faktur tetap disimpan.
       </div>
+      <label for="cancel-purchase-reason">Alasan pembatalan</label>
+      <input id="cancel-purchase-reason" class="form-input" maxlength="1000" placeholder="Contoh: salah input faktur" required />
       <div style="display:flex;justify-content:flex-end;gap:10px">
         <button type="button" class="btn btn-secondary" id="btn-cancel-del">Batal</button>
         <button type="button" class="btn btn-danger" id="btn-confirm-del">
@@ -393,21 +442,29 @@ function showDeleteInvoiceModal(inv) {
   if (window.lucide) lucide.createIcons();
 
   document.getElementById('btn-cancel-del').onclick = closeModal;
-  document.getElementById('btn-confirm-del').onclick = async () => {
+  document.getElementById('btn-confirm-del').onclick = (event) => runAction(event.currentTarget,async () => {
+    const epoch=pageEpoch;
+    const button=document.getElementById('btn-confirm-del');
+    const reason=document.getElementById('cancel-purchase-reason').value.trim();
+    if(!reason) throw new Error('Isi alasan pembatalan terlebih dahulu.');
     try {
-      await purchases.remove(inv.id);
-      closeModal();
+      const saved=await purchases.remove(inv.id,reason,inv.version);
+      if(epoch!==pageEpoch) return;
+      if(button.isConnected) closeModal();
       showToast(`Faktur ${inv.invoiceNo} berhasil dibatalkan dan stok telah disesuaikan.`, 'success');
+      if(saved?.inventoryRefreshFailed) showToast('Pembatalan tersimpan; segarkan tampilan stok saat koneksi pulih.','warning');
       const content = document.getElementById('purchase-page-content');
-      if (content) {
+      if (content && activeView==='list') {
         content.innerHTML = renderListView();
         if (window.lucide) lucide.createIcons();
         initListViewEvents();
       }
     } catch (err) {
-      showToast('Gagal membatalkan faktur: ' + err.message, 'error');
+      if(epoch===pageEpoch) showToast(err.message, 'error',7000);
+    } finally {
+      if(epoch===pageEpoch) renderPurchaseNotices();
     }
-  };
+  });
 }
 
 function showInvoiceDetailModal(inv) {
@@ -428,6 +485,7 @@ function showInvoiceDetailModal(inv) {
   const modalHtml = `
     <div style="padding:10px 0">
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;background:var(--bg-alt);padding:14px;border-radius:var(--radius);margin-bottom:16px;font-size:13px">
+        <div><div style="color:var(--text-muted)">Status</div><strong>${inv.status==='cancelled' ? 'Dibatalkan' : 'Tersimpan'}</strong>${inv.cancellationReason ? `<p>${escapeHtml(inv.cancellationReason)}</p>` : ''}${inv.canModifyStock===false ? '<p>Batch faktur lama perlu dicocokkan sebelum revisi stok.</p>' : ''}</div>
         <div>
           <div style="color:var(--text-muted)">Nomor Faktur</div>
           <strong style="font-size:15px;color:var(--text)">${escapeHtml(inv.invoiceNo)}</strong>
@@ -539,7 +597,7 @@ let formState = {
   orderNo: '',
   invoiceNo: '',
   invoiceDate: today(),
-  receivedAt: new Date().toISOString().slice(0, 16),
+  receivedAt: businessDateTime(),
   invoiceType: 'exclude_tax', // 'exclude_tax' | 'include_tax' | 'no_tax'
   warehouse: 'Gudang Utama',
   paymentType: 'kredit', // 'kredit' | 'tunai' | 'transfer'
@@ -562,7 +620,7 @@ function resetFormState() {
     orderNo: '',
     invoiceNo: '',
     invoiceDate: today(),
-    receivedAt: new Date().toISOString().slice(0, 16),
+    receivedAt: businessDateTime(),
     invoiceType: 'exclude_tax',
     warehouse: 'Gudang Utama',
     paymentType: 'kredit',
@@ -586,7 +644,7 @@ function renderCreateView() {
   // Compute due date from invoiceDate + paymentTerm
   const invDateObj = new Date(formState.invoiceDate || today());
   invDateObj.setDate(invDateObj.getDate() + Number(formState.paymentTerm || 0));
-  formState.dueDate = businessDate(invDateObj);
+  if(!formState.dueDate) formState.dueDate = businessDate(invDateObj);
 
   // If items empty, add an initial blank row
   if (formState.items.length === 0) {
@@ -860,7 +918,7 @@ function renderItemsTableBody() {
           <input type="number" class="form-input form-input-sm item-qty" data-index="${idx}" value="${it.qty}" min="1" style="text-align:center" required />
         </td>
         <td>
-          <input type="text" class="form-input form-input-sm item-unit" data-index="${idx}" value="${escapeHtml(it.unit)}" placeholder="Satuan" />
+          <input type="text" class="form-input form-input-sm item-unit" readonly title="Satuan mengikuti master produk" data-index="${idx}" value="${escapeHtml(it.unit)}" placeholder="Satuan" />
         </td>
         <td>
           <input type="number" class="form-input form-input-sm item-buy-price" data-index="${idx}" value="${it.buyPrice}" min="0" style="text-align:right" required />
@@ -920,7 +978,7 @@ function calculateTotals() {
   // Overall tax if invoiceType === 'exclude_tax'
   let overallTax = 0;
   if (formState.invoiceType === 'exclude_tax') {
-    // Standard 11% PPN on taxable base
+    // Preserve the configured invoice calculation; the server verifies totals.
     const base = Math.max(0, subtotal - discountAmount);
     overallTax = Math.round(base * 0.11);
   }
@@ -1261,6 +1319,9 @@ function showAddSupplierModal() {
   document.getElementById('btn-cancel-supp').onclick = closeModal;
   document.getElementById('form-quick-supplier').onsubmit = async (e) => {
     e.preventDefault();
+    const form=e.currentTarget;
+    if(form.dataset.busy==='true') return;
+    const epoch=pageEpoch;
     const name = document.getElementById('new-supp-name').value.trim();
     const phone = document.getElementById('new-supp-phone').value.trim();
     const address = document.getElementById('new-supp-addr').value.trim();
@@ -1269,9 +1330,13 @@ function showAddSupplierModal() {
       showToast('Nama supplier wajib diisi.', 'error');
       return;
     }
-
+    form.dataset.busy='true';
+    form.dataset.requestId ||= crypto.randomUUID();
+    const submit=form.querySelector('button[type="submit"]');
+    if(submit) submit.disabled=true;
     try {
-      const created = await suppliers.add({ name, phone, address });
+      const created = await suppliers.add({ name, phone, address,requestId:form.dataset.requestId });
+      if(epoch!==pageEpoch || !form.isConnected) return;
       showToast(`Supplier ${created.name} berhasil ditambahkan.`, 'success');
       closeModal();
 
@@ -1290,13 +1355,18 @@ function showAddSupplierModal() {
         `;
       }
     } catch (err) {
-      showToast('Gagal menyimpan supplier: ' + err.message, 'error');
+      if(epoch===pageEpoch) showToast('Gagal menyimpan supplier: ' + err.message, 'error');
+    } finally {
+      form.dataset.busy='false';
+      if(submit?.isConnected) submit.disabled=false;
     }
   };
 }
 
 async function handleSaveInvoice() {
   const btnSave = document.getElementById('btn-save-purchase');
+  if(btnSave?.disabled) return;
+  const epoch=pageEpoch;
 
   // Sync inputs from DOM directly
   const invNoInput = document.getElementById('inv-no');
@@ -1338,7 +1408,7 @@ async function handleSaveInvoice() {
       if (pSel && pSel.value) formState.items[idx].productId = pSel.value;
       if (expInp) formState.items[idx].expiry = expInp.value;
       if (batchInp) formState.items[idx].batchNo = batchInp.value;
-      if (qtyInp) formState.items[idx].qty = Number(qtyInp.value) || 1;
+      if (qtyInp) formState.items[idx].qty = Number(qtyInp.value);
       if (unitInp) formState.items[idx].unit = unitInp.value;
       if (priceInp) formState.items[idx].buyPrice = Number(priceInp.value) || 0;
       if (discInp) formState.items[idx].discountPercent = Number(discInp.value) || 0;
@@ -1369,8 +1439,16 @@ async function handleSaveInvoice() {
       showToast(`Baris #${i + 1}: Nomor batch wajib diisi.`, 'error');
       return;
     }
-    if (!it.qty || it.qty <= 0) {
-      showToast(`Baris #${i + 1}: Kuantitas harus lebih dari nol.`, 'error');
+    if (!Number.isSafeInteger(it.qty) || it.qty <= 0 || it.qty>1000000) {
+      showToast(`Baris #${i + 1}: Kuantitas harus bilangan bulat positif.`, 'error');
+      return;
+    }
+    if(!Number.isSafeInteger(it.buyPrice) || it.buyPrice<0 || !Number.isFinite(it.discountPercent) || it.discountPercent<0 || it.discountPercent>100 || !Number.isFinite(it.taxPercent) || it.taxPercent<0 || it.taxPercent>100) {
+      showToast(`Baris #${i + 1}: Periksa harga, diskon, dan pajak.`, 'error');
+      return;
+    }
+    if(products.getById(it.productId)?.category==='obat' && !it.expiry) {
+      showToast(`Baris #${i + 1}: Tanggal kedaluwarsa obat wajib diisi.`, 'error');
       return;
     }
   }
@@ -1390,7 +1468,7 @@ async function handleSaveInvoice() {
     supplierId: formState.supplierId || null,
     supplierName: formState.supplierName || 'Umum',
     invoiceDate: formState.invoiceDate,
-    receivedAt: formState.receivedAt,
+    receivedAt: formState.receivedAt ? `${formState.receivedAt}+07:00` : null,
     invoiceType: formState.invoiceType,
     warehouse: formState.warehouse,
     paymentType: formState.paymentType,
@@ -1431,14 +1509,18 @@ async function handleSaveInvoice() {
   try {
     let saved;
     if (formState.editingId) {
-      saved = await purchases.update(formState.editingId, invoicePayload);
+      saved = await purchases.update(formState.editingId, invoicePayload,formState.version);
+      if(epoch!==pageEpoch) return;
       showToast(`Faktur ${saved.invoiceNo} berhasil diperbarui dan stok telah disesuaikan.`, 'success');
     } else {
       saved = await purchases.add(invoicePayload);
+      if(epoch!==pageEpoch) return;
       showToast(`Faktur ${saved.invoiceNo} berhasil disimpan dan stok batch telah diperbarui.`, 'success');
     }
 
     resetFormState();
+    renderPurchaseNotices();
+    if(saved.inventoryRefreshFailed) showToast('Faktur tersimpan; segarkan tampilan stok saat koneksi pulih.','warning');
 
     // Return to list view
     activeView = 'list';
@@ -1452,7 +1534,9 @@ async function handleSaveInvoice() {
       window.location.hash = '/purchases';
     }
   } catch (err) {
-    showToast('Gagal menyimpan faktur: ' + err.message, 'error');
+    if(epoch!==pageEpoch) return;
+    renderPurchaseNotices();
+    showToast((purchases.pending?.() ? 'Penyimpanan belum terkonfirmasi: ' : 'Gagal menyimpan faktur: ') + err.message, 'error',7000);
     if (btnSave) {
       btnSave.disabled = false;
       btnSave.innerHTML = '<i data-lucide="check"></i> <span>Simpan Faktur</span>';
