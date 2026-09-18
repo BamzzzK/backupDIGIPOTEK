@@ -12,6 +12,7 @@ import { renderProducts } from './pages/products.js';
 import { renderStock } from './pages/stock.js';
 import { renderReports } from './pages/reports.js';
 import { renderPurchases } from './pages/purchases.js';
+import { renderHistory } from './pages/history.js';
 
 // Initialize seed data
 async function start() {
@@ -23,10 +24,11 @@ registerRoute('/pending', renderPending);
 registerRoute('/staff', renderStaff, ['owner']);
 registerRoute('/dashboard', renderDashboard, ['owner']);
 registerRoute('/pos', renderPOS, ['owner', 'kasir']);
-registerRoute('/purchases', renderPurchases, ['owner']);
-registerRoute('/purchases/new', () => renderPurchases('new'), ['owner']);
+registerRoute('/purchases', renderPurchases, ['owner', 'kasir']);
+registerRoute('/purchases/new', () => renderPurchases('new'), ['owner', 'kasir']);
 registerRoute('/products', renderProducts, ['owner']);
-registerRoute('/stock', renderStock, ['owner']);
+registerRoute('/stock', renderStock, ['owner', 'kasir']);
+registerRoute('/history', renderHistory, ['owner', 'kasir']);
 registerRoute('/reports', renderReports, ['owner']);
 
 // Start router

@@ -3,14 +3,16 @@ import { renderSidebar } from '../components/sidebar.js';
 import { renderHeader, bindHeaderEvents } from '../components/header.js';
 import { showToast } from '../components/toast.js';
 import { showModal, closeModal } from '../components/modal.js';
-import { products } from '../store.js';
-import { runAction, formatRupiah, escapeHtml, categoryBadge, stockBadge, formatDate, daysBetween, today, debounce } from '../utils.js';
+import { products, auth } from '../store.js';
+import { runAction, formatRupiah, escapeHtml, categoryBadge, stockBadge, formatDate, daysBetween, today, debounce, generateBatchNo } from '../utils.js';
 
 let categoryFilter = '';
 let statusFilter = '';
 let searchQuery = '';
+let stockPage=0;
 
 export function renderStock() {
+  stockPage++;
   categoryFilter = '';
   statusFilter = '';
   searchQuery = '';
@@ -94,7 +96,7 @@ export function renderStock() {
   renderStockTable();
   bindStockEvents();
 
-  return {};
+  return {destroy(){stockPage++;}};
 }
 
 function getFilteredProducts() {
@@ -170,9 +172,12 @@ function renderStockTable() {
                 <button class="btn btn-sm btn-secondary" data-action="view-batch" data-id="${p.id}" title="Lihat Batch">
                   <i data-lucide="eye"></i>
                 </button>
-                <button class="btn btn-sm btn-primary" data-action="adjust" data-id="${p.id}" title="Adjustment Stok">
-                  <i data-lucide="settings-2"></i>
+                <button class="btn btn-sm btn-primary" data-action="receive" data-id="${p.id}" title="Tambah Stok" aria-label="Tambah stok ${escapeHtml(p.name)}">
+                  <i data-lucide="plus"></i> Tambah
                 </button>
+                ${auth.isOwner() ? `<button class="btn btn-sm btn-secondary" data-action="adjust" data-id="${p.id}" title="Adjustment Stok">
+                  <i data-lucide="settings-2"></i>
+                </button>` : ''}
               </div>
             </td>
           </tr>
@@ -190,6 +195,35 @@ function renderStockTable() {
   container.querySelectorAll('[data-action="adjust"]').forEach(btn => {
     btn.addEventListener('click', () => showAdjustStock(btn.dataset.id));
   });
+  container.querySelectorAll('[data-action="receive"]').forEach(btn=>{
+    btn.addEventListener('click',()=>showReceiveStock(btn.dataset.id));
+  });
+}
+
+function showReceiveStock(productId) {
+  const product=products.getById(productId);if(!product)return;
+  const page=stockPage;
+  showModal({title:'Tambah Stok',content:`
+    <p style="margin-bottom:16px"><strong>${escapeHtml(product.name)}</strong> · Stok saat ini ${product.stock} ${escapeHtml(product.unit)}</p>
+    <p style="margin-bottom:16px;color:var(--text-muted)">Untuk barang dengan faktur supplier, masukkan melalui Faktur Pembelian agar stok tercatat sekali.</p>
+    <form id="receive-stock-form">
+      <div class="form-group"><label for="receive-qty">Jumlah (${escapeHtml(product.unit)})</label><input class="form-input" type="number" id="receive-qty" min="1" max="1000000" step="1" required></div>
+      <div class="form-group"><label for="receive-batch">Nomor batch</label><input class="form-input" id="receive-batch" maxlength="150" value="${generateBatchNo()}" required></div>
+      <div class="form-group"><label for="receive-expiry">Tanggal kedaluwarsa${product.category==='obat'?' (wajib)':''}</label><input class="form-input" type="date" id="receive-expiry" min="${today()}" ${product.category==='obat'?'required':''}></div>
+    </form>`,footer:'<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" id="receive-save">Simpan Stok</button>'});
+  document.getElementById('receive-save').onclick=e=>{
+    const button=e.currentTarget;
+    return runAction(button,async()=>{
+      const form=document.getElementById('receive-stock-form');if(!form.reportValidity())return;
+      const qty=Number(document.getElementById('receive-qty').value);
+      const batch=document.getElementById('receive-batch').value.trim();
+      if(!Number.isSafeInteger(qty)||qty<=0||qty>1000000||!batch)throw new Error('Periksa jumlah dan nomor batch.');
+      await products.addStock(productId,qty,batch,document.getElementById('receive-expiry').value);
+      if(page!==stockPage || !button.isConnected)return;
+      closeModal();renderStock();
+      showToast(`Stok ${product.name} bertambah ${qty} ${product.unit}`,'success');
+    });
+  };
 }
 
 function showBatchDetail(productId) {
@@ -243,6 +277,7 @@ function showBatchDetail(productId) {
 }
 
 function showAdjustStock(productId) {
+  if(!auth.isOwner())return;
   const product = products.getById(productId);
   if (!product) return;
 
@@ -328,4 +363,3 @@ function bindStockEvents() {
     renderStockTable();
   });
 }
-

@@ -103,6 +103,23 @@ test('logout blocks late response cache writes and pending commands stay account
   assert.equal(sessionStorage.getItem(`apotek:${client.supabaseUrl}:owner-a:purchase-command`),null);
   assert.ok(aPending.args.request_id);
   profile={id:'cashier',role:'kasir',active:true};await auth.refresh();
-  await assert.rejects(()=>purchases.loadRange('2026-09-01','2026-09-30'),/pemilik/);
+  assert.deepEqual(await purchases.loadRange('2026-09-01','2026-09-30'),[]);
   assert.deepEqual(suppliers.getAll(),[]);
+  profile={id:'cashier',role:'kasir',active:false};await auth.refresh();
+  await assert.rejects(()=>purchases.loadRange('2026-09-01','2026-09-30'),/pegawai aktif/);
+});
+
+test('active cashier can create and retry purchases but cannot edit, cancel, add suppliers or export legacy data',async()=>{
+  profile={id:'cashier',role:'kasir',active:true};await auth.refresh();
+  rpcHandler=()=>{throw new Error('Disconnected');};
+  await assert.rejects(()=>purchases.add({invoiceNo:'CASHIER'}),/Disconnected/);
+  const request=purchases.pending().args.request_id;
+  rpcHandler=()=>ok(row('CASHIER'));
+  await purchases.retryPending();
+  assert.equal(requests.at(-1).args.request_id,request);
+  assert.equal(purchases.getAll()[0].invoiceNo,'CASHIER');
+  await assert.rejects(()=>purchases.update('CASHIER',{}),/pemilik/);
+  await assert.rejects(()=>purchases.remove('CASHIER'),/pemilik/);
+  await assert.rejects(()=>suppliers.add({name:'Test'}),/pemilik/);
+  assert.throws(()=>purchases.exportLegacy(),/pemilik/);
 });

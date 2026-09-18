@@ -52,8 +52,9 @@ setTimeout(() => URL.revokeObjectURL(url), 1000);
 
 ## Hak akses dan konsistensi stok
 
-- Pemilik: katalog, pembelian/supplier, penerimaan/pengurangan stok, laporan, persetujuan kasir, impor awal. Faktur, supplier, dan riwayat perubahan pembelian hanya dapat dibaca pemilik, termasuk melalui API.
-- Kasir: membaca katalog/batch dan membuat penjualan; hanya dapat membaca penjualannya sendiri melalui API.
+- Pemilik: seluruh katalog, pembelian/supplier, penerimaan/pengurangan stok, laporan, persetujuan kasir, dan impor awal. Pemilik dapat melihat seluruh transaksi serta jejak revisi pembelian.
+- Kasir aktif: melihat stok/batch, menambah stok dengan batch dan kedaluwarsa, membuat penjualan, serta membuat faktur pembelian. Kasir dapat membaca daftar supplier untuk input faktur, faktur buatannya sendiri, dan histori penjualan yang dilayaninya. Pembatasan baris berlaku di API/database, bukan hanya pada menu.
+- Revisi/pembatalan faktur, pengurangan stok, pengubahan master produk, penambahan supplier, laporan margin, dan pengelolaan akun tetap memerlukan peran pemilik.
 - Stok dihitung dari jumlah batch. Pengubahan stok langsung lewat form edit produk tidak diizinkan.
 - `checkout` menghitung harga, diskon, HPP dan kembalian di database; harga dari browser hanya digunakan untuk mendeteksi harga yang sudah berubah.
 - Penguncian produk dengan urutan ID tetap dan transaksi PostgreSQL menjaga stok ketika kasir bekerja bersamaan.
@@ -63,6 +64,8 @@ setTimeout(() => URL.revokeObjectURL(url), 1000);
 - QRIS dan transfer dicatat berdasarkan konfirmasi kasir; belum ada integrasi verifikasi pembayaran dari penyedia pembayaran.
 - Tampilan katalog POS dimuat ulang setiap 30 detik saat tab aktif; checkout selalu memeriksa stok di server. Laporan diambil per rentang tanggal, dipaginasi dalam pengambilan data, maksimal 93 hari per permintaan.
 - Hari laporan menggunakan zona waktu Asia/Jakarta.
+
+Menu **Histori Transaksi** menyediakan filter tanggal (maksimal 93 hari), pencarian nomor/produk/kasir, paginasi tampilan, serta rincian barang, diskon, pembayaran, dan kembalian. Kasir melihat transaksi sendiri; pemilik melihat seluruh petugas. Menu **Manajemen Stok > Tambah** digunakan untuk penerimaan tanpa faktur; barang yang sudah dimasukkan melalui **Faktur Pembelian** tidak perlu ditambah lagi di menu stok.
 
 ## Pembelian yang konsisten
 

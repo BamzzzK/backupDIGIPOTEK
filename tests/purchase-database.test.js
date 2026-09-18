@@ -131,7 +131,7 @@ test('owner purchase data is hidden from cashier, pending and anonymous roles',a
     await db.query("select set_config('request.jwt.claim.sub',$1,true)",[user]);
     assert.equal(await scalar('select count(*) from public.purchase_invoices'),0);
     assert.equal(await scalar('select count(*) from public.purchase_events'),0);
-    await fails(()=>save(),/Akses pegawai/);
+    if(user===pending) await fails(()=>save(),/Akses pegawai/);
   }
   await db.exec('set local role anon');
   await fails(()=>save(),/permission denied/);
@@ -142,6 +142,72 @@ test('supplier creation returns a real UUID and safely replays the same request'
   const a=await scalar('select public.save_supplier($1)',[body]);const b=await scalar('select public.save_supplier($1)',[body]);
   assert.equal(a.id,b.id);assert.equal(await scalar('select count(*) from public.suppliers'),1);
   const doc=await save(payload({supplierId:a.id,supplierName:'Forged name'}));assert.equal(doc.supplier_name,'Supplier Test');
+});
+test('cashier receives a dated batch with its own actor; subtraction and master edits stay restricted',async()=>{
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[cashier]);
+  await db.query("select public.change_stock($1,'add',4,'CASHIER-RECEIPT','2035-01-01','Penerimaan stok')",[product]);
+  assert.equal(await scalar('select sum(qty) from public.batches'),4);
+  await fails(()=>db.query("select public.change_stock($1,'subtract',1)",[product]),/Akses pegawai/);
+  await fails(()=>db.query("select public.change_stock($1,null,1)",[product]),/Akses pegawai/);
+  await fails(()=>db.query("select public.change_stock($1,'add',1)",[product]),/kedaluwarsa/);
+  await fails(()=>db.query("select public.save_product($1,$2)",[product,{name:'Forged master',category:'obat',unit:'pcs',buyPrice:1,sellPrice:2}]),/Akses pegawai/);
+  await fails(()=>db.query("select public.delete_product($1)",[product]),/Akses pegawai/);
+  await db.exec('reset role');
+  assert.equal(await scalar('select actor_id from public.stock_movements limit 1'),cashier);
+  const batch=(await db.query('select batch_no,expiry::text,cost_price from public.batches limit 1')).rows[0];
+  assert.deepEqual(batch,{batch_no:'CASHIER-RECEIPT',expiry:'2035-01-01',cost_price:100});
+});
+test('cashier creates an atomic invoice, replays safely, reads own items and cannot edit or cancel',async()=>{
+  const supplier=await scalar('select public.save_supplier($1)',[{id:randomUUID(),name:'Operational supplier'}]);
+  const ownerInvoice=await save(payload({invoiceNo:'OWNER-INVOICE'}));
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[cashier]);
+  assert.equal(await scalar('select count(*) from public.suppliers'),1);
+  const body=payload({invoiceNo:'CASHIER-INVOICE',supplierId:supplier.id,officerId:owner,officerName:'Forged'}),request=randomUUID();
+  const doc=await save(body,null,null,request);
+  assert.equal(doc.officer_id,cashier);assert.equal(doc.officer_name,'Cashier');
+  assert.equal((await save(body,null,null,request)).id,doc.id);
+  assert.equal(await scalar('select sum(qty) from public.batches'),10);
+  assert.equal(await scalar('select count(*) from public.purchase_invoices'),1);
+  assert.equal(await scalar('select count(*) from public.purchase_items'),1);
+  assert.equal(await scalar('select count(*) from public.purchase_invoices where id=$1',[ownerInvoice.id]),0);
+  await fails(()=>save(body,doc.id,doc.version),/Akses pegawai/);
+  await fails(()=>save(body,ownerInvoice.id,ownerInvoice.version),/Akses pegawai/);
+  await fails(()=>cancel(doc),/Akses pegawai/);
+  await fails(()=>db.query('select public.save_supplier($1)',[{id:randomUUID(),name:'Forbidden'}]),/Akses pegawai/);
+  await fails(()=>db.exec('update public.purchase_invoices set total=0'),/permission denied/);
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[owner]);
+  assert.equal(await scalar('select count(*) from public.purchase_invoices'),2);
+});
+test('another cashier cannot read invoice items or replay someone else\'s request',async()=>{
+  await db.exec(`reset role; update public.staff set role='kasir',active=true where id='${pending}'; set local role authenticated;`);
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[cashier]);
+  const request=randomUUID(),body=payload();await save(body,null,null,request);
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[pending]);
+  assert.equal(await scalar('select count(*) from public.purchase_invoices'),0);
+  assert.equal(await scalar('select count(*) from public.purchase_items'),0);
+  await fails(()=>save(body,null,null,request),/sudah digunakan/);
+});
+test('sales history exposes cashier\'s own receipts and items while owner retains all sales',async()=>{
+  await save();
+  const checkout=()=>scalar("select public.checkout($1,$2,'nominal',0,'tunai',300)",[randomUUID(),[{productId:product,qty:1,price:300}]]);
+  const ownerSale=await checkout();
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[cashier]);
+  const cashierSale=await checkout();
+  assert.equal(await scalar('select count(*) from public.sales'),1);
+  assert.equal(await scalar('select count(*) from public.sale_items'),1);
+  assert.equal(await scalar('select id from public.sales'),cashierSale);
+  assert.equal(await scalar('select count(*) from public.sales where id=$1',[ownerSale]),0);
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[owner]);
+  assert.equal(await scalar('select count(*) from public.sales'),2);
+});
+test('inactive staff still cannot receive stock or create invoices',async()=>{
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[pending]);
+  await fails(()=>save(),/Akses pegawai/);
+  await fails(()=>db.query("select public.change_stock($1,'add',4,'DENIED','2035-01-01','Penerimaan stok')",[product]),/Akses pegawai/);
+  assert.equal(await scalar('select count(*) from public.products'),0);
+  assert.equal(await scalar('select count(*) from public.suppliers'),0);
+  await db.exec('reset role');
+  assert.equal(await scalar('select count(*) from public.batches'),0);
 });
 test('existing FEFO, checkout, activation and import SQL fixtures still pass in a separate database',async()=>{
   const isolated=await createTestDatabase();

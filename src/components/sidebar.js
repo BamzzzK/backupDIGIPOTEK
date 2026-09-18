@@ -14,13 +14,13 @@ export function renderSidebar() {
     { section: 'MENU UTAMA' },
     ...(isOwner ? [{ path: '/dashboard', icon: 'layout-dashboard', label: 'Dashboard' }] : []),
     { path: '/pos', icon: 'shopping-cart', label: 'Kasir (POS)' },
-    ...(isOwner ? [
       { section: 'PEMBELIAN' },
       { path: '/purchases', icon: 'file-text', label: 'Faktur Pembelian' },
       { section: 'INVENTORI' },
-      { path: '/products', icon: 'package', label: 'Produk' },
-      { path: '/stock', icon: 'boxes', label: 'Manajemen Stok' }
-    ] : []),
+      ...(isOwner ? [{ path: '/products', icon: 'package', label: 'Produk' }] : []),
+      { path: '/stock', icon: 'boxes', label: 'Manajemen Stok' },
+      { section: 'TRANSAKSI' },
+      { path: '/history', icon: 'receipt', label: 'Histori Transaksi' },
     ...(isOwner ? [
       { section: 'LAPORAN' },
       { path: '/staff', icon: 'users', label: 'Pegawai & Data' },
@@ -70,4 +70,3 @@ export function renderSidebar() {
     </aside>
   `;
 }
-

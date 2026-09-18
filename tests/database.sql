@@ -25,7 +25,7 @@ begin
   raise exception 'FAIL: oversell accepted';
  exception when sqlstate 'P0001' then if sqlerrm like 'FAIL:%' then raise; end if; end;
  if (select count(*) from public.sales where request_id='55555555-5555-4555-8555-555555555555')<>0 then raise exception 'FAIL: partial transaction';end if;
- begin perform public.change_stock(current_setting('test.product_id')::uuid,'add',99);raise exception 'FAIL: cashier stock change';exception when insufficient_privilege then null;end;
+ begin perform public.change_stock(current_setting('test.product_id')::uuid,'subtract',1);raise exception 'FAIL: cashier stock subtraction';exception when insufficient_privilege then null;end;
  begin update public.batches set qty=999;raise exception 'FAIL: direct update';exception when insufficient_privilege then null;end;
 end $$;
 select set_config('request.jwt.claim.sub','33333333-3333-4333-8333-333333333333',true);

@@ -41,7 +41,7 @@ export function renderPurchases(subAction = 'list') {
     <div class="app-layout">
       ${renderSidebar()}
       <div class="main-content">
-        ${renderHeader('Faktur Pembelian', 'Kelola penerimaan barang dan faktur pembelian dari supplier')}
+        ${renderHeader('Faktur Pembelian', auth.isOwner() ? 'Kelola penerimaan barang dan faktur pembelian dari supplier' : 'Buat faktur dan lihat faktur pembelian yang kamu catat')}
         <div id="purchase-notices" aria-live="polite"></div>
         <div class="page-content" id="purchase-page-content">
           ${activeView === 'create' ? renderCreateView() : renderListView()}
@@ -229,12 +229,12 @@ function renderTableContent(items) {
             <button class="btn btn-sm btn-secondary btn-icon-only btn-view-invoice" data-id="${inv.id}" title="Lihat Rincian Faktur" aria-label="Lihat Rincian Faktur">
               <i data-lucide="eye"></i>
             </button>
-            <button class="btn btn-sm btn-secondary btn-icon-only btn-edit-invoice" data-id="${inv.id}" title="Edit Faktur" aria-label="Edit Faktur" ${inv.status==='cancelled' ? 'disabled' : ''}>
+            ${auth.isOwner() ? `<button class="btn btn-sm btn-secondary btn-icon-only btn-edit-invoice" data-id="${inv.id}" title="Edit Faktur" aria-label="Edit Faktur" ${inv.status==='cancelled' ? 'disabled' : ''}>
               <i data-lucide="edit-3"></i>
             </button>
             <button class="btn btn-sm btn-secondary btn-icon-only btn-delete-invoice" data-id="${inv.id}" title="Batalkan Faktur" aria-label="Batalkan Faktur" style="color:var(--danger)" ${inv.status==='cancelled' || inv.canModifyStock===false ? 'disabled' : ''}>
               <i data-lucide="trash-2"></i>
-            </button>
+            </button>` : ''}
           </div>
         </td>
       </tr>
@@ -368,6 +368,7 @@ function bindViewDetailButtons() {
   const editBtns = document.querySelectorAll('.btn-edit-invoice');
   editBtns.forEach(btn => {
     btn.onclick = () => {
+      if(!auth.isOwner())return;
       const invId = btn.getAttribute('data-id');
       const invoice = purchases.getById(invId);
       if (invoice) {
@@ -418,6 +419,7 @@ function bindViewDetailButtons() {
 }
 
 function showDeleteInvoiceModal(inv) {
+  if(!auth.isOwner())return;
   const modalHtml = `
     <div style="padding:10px 0">
       <p style="margin-bottom:12px;font-size:14px">
@@ -686,15 +688,15 @@ function renderCreateView() {
         <div class="form-grid-3">
           <!-- Kolom 1 -->
           <div class="form-group">
-            <label for="inv-supplier" class="form-label required">Supplier</label>
+            <label for="inv-supplier" class="form-label">Supplier</label>
             <div style="display:flex;gap:6px">
-              <select id="inv-supplier" class="form-input" style="flex:1" required>
-                <option value="">Pilih supplier</option>
+              <select id="inv-supplier" class="form-input" style="flex:1">
+                <option value="">Umum (tanpa supplier)</option>
                 ${supplierOptions}
               </select>
-              <button type="button" class="btn btn-secondary btn-icon-only" id="btn-add-quick-supplier" title="Tambah Supplier Baru" aria-label="Tambah Supplier Baru">
+              ${auth.isOwner() ? `<button type="button" class="btn btn-secondary btn-icon-only" id="btn-add-quick-supplier" title="Tambah Supplier Baru" aria-label="Tambah Supplier Baru">
                 <i data-lucide="plus"></i>
-              </button>
+              </button>` : ''}
             </div>
           </div>
 

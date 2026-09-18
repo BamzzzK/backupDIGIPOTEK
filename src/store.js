@@ -10,9 +10,12 @@ let appSettings = null;
 let authEpoch = 0;
 let purchaseRead = 0;
 let supplierRead = 0;
+let transactionRead = 0;
 function checked(result) { if (result.error) throw Object.assign(new Error(result.error.message), {code:result.error.code}); return result.data; }
 async function rpc(name, args) { return checked(await supabase.rpc(name, args)); }
-function clearCache() { session = null; inventory = []; transactionCache = []; purchaseCache = []; supplierCache = []; appSettings = null; authEpoch++; purchaseRead++; supplierRead++; }
+function clearCache() { session = null; inventory = []; transactionCache = []; purchaseCache = []; supplierCache = []; appSettings = null; authEpoch++; purchaseRead++; supplierRead++; transactionRead++; }
+function isActiveStaff() { return session?.active && ['owner','kasir'].includes(session.role); }
+function requireStaff() { if(!isActiveStaff()) throw new Error('Akses pegawai aktif diperlukan.'); }
 function normalizeUsername(value) {
   const username = String(value || '').trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) {
@@ -135,7 +138,7 @@ export const transactions = {
  async loadRange(from,to) {
    if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)||from>to) throw new Error('Rentang tanggal tidak valid');
    if((new Date(to)-new Date(from))/86400000>92) throw new Error('Pilih rentang maksimal 93 hari agar laporan tetap ringan.');
-   const epoch=authEpoch;
+   const epoch=authEpoch,ticket=++transactionRead;
    const rows=[];
    const start=new Date(`${from}T00:00:00+07:00`).toISOString();
    const end=new Date(new Date(`${to}T00:00:00+07:00`).getTime()+86400000).toISOString();
@@ -144,7 +147,8 @@ export const transactions = {
      rows.push(...page);if(page.length<500)break;
    }
    const next=rows.map(mapTransaction);
-   if(epoch===authEpoch)transactionCache=next;
+   if(epoch!==authEpoch || ticket!==transactionRead) return [];
+   transactionCache=next;
    return next;
  },
  async add(trx) {
@@ -224,8 +228,8 @@ function mapPurchaseInvoice(row) {
 function requireOwner() {
   if (!auth.isOwner()) throw new Error('Akses pemilik diperlukan.');
 }
-function ownerKey(kind) {
-  requireOwner();
+function staffKey(kind) {
+  requireStaff();
   return `apotek:${supabase.supabaseUrl || 'local'}:${session.id}:${kind}`;
 }
 function validateRange(from, to) {
@@ -233,7 +237,7 @@ function validateRange(from, to) {
       !Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to))) throw new Error('Rentang tanggal tidak valid.');
 }
 function readPending() {
-  const raw=sessionStorage.getItem(ownerKey('purchase-command'));
+  const raw=sessionStorage.getItem(staffKey('purchase-command'));
   if (!raw) return null;
   try { return JSON.parse(raw); }
   catch { throw new Error('Data permintaan tertunda tidak terbaca. Periksa faktur sebelum membersihkan penyimpanan tab.'); }
@@ -261,8 +265,9 @@ async function executePurchase(command, key) {
   return saved;
 }
 async function sendPurchase(method, args) {
-  requireOwner();
-  const key=ownerKey('purchase-command');
+  requireStaff();
+  if(method!=='save_purchase' || args.invoice_id!==null) requireOwner();
+  const key=staffKey('purchase-command');
   let command=readPending();
   const fingerprint=JSON.stringify({method,args});
   if(command && command.fingerprint!==fingerprint) throw new Error('Ada permintaan pembelian yang belum terkonfirmasi. Selesaikan melalui tombol Periksa permintaan tertunda.');
@@ -279,9 +284,9 @@ async function sendPurchase(method, args) {
 }
 
 export const suppliers = {
-  getAll:()=>auth.isOwner()?supplierCache:[],
+  getAll:()=>isActiveStaff()?supplierCache:[],
   async load() {
-    requireOwner();
+    requireStaff();
     const epoch=authEpoch,ticket=++supplierRead,rows=[];
     for(let offset=0;;offset+=500) {
       const page=checked(await supabase.from('suppliers').select('*').order('name').order('id').range(offset,offset+499));
@@ -303,12 +308,12 @@ export const suppliers = {
 };
 
 export const purchases = {
-  getAll:()=>auth.isOwner()?purchaseCache:[],
+  getAll:()=>isActiveStaff()?purchaseCache:[],
   getById(id) { return this.getAll().find(p=>p.id===id); },
   getByDateRange(from,to) { return this.getAll().filter(p=>p.invoiceDate>=from && p.invoiceDate<=to); },
-  pending() { return auth.isOwner()?readPending():null; },
+  pending() { return isActiveStaff()?readPending():null; },
   async retryPending() {
-    requireOwner();
+    requireStaff();
     const command=readPending();
     if(!command) throw new Error('Tidak ada permintaan tertunda.');
     const {request_id,...args}=command.args;
@@ -327,7 +332,7 @@ export const purchases = {
     return {exportedAt:new Date().toISOString(),purchases:localStorage.getItem('dp_purchases'),suppliers:localStorage.getItem('dp_suppliers')};
   },
   async loadRange(from,to) {
-    requireOwner(); validateRange(from,to);
+    requireStaff(); validateRange(from,to);
     const epoch=authEpoch,ticket=++purchaseRead,rows=[];
     for(let offset=0;;offset+=500) {
       const page=checked(await supabase.from('purchase_invoices').select('*,purchase_items(*)')
@@ -343,11 +348,13 @@ export const purchases = {
     return sendPurchase('save_purchase',{invoice_id:null,expected_version:null,payload});
   },
   async update(id,payload,version) {
+    requireOwner();
     const existing=this.getById(id);
     if(!existing) throw new Error('Faktur belum dimuat. Segarkan daftar terlebih dahulu.');
     return sendPurchase('save_purchase',{invoice_id:id,expected_version:version ?? existing.version,payload});
   },
   async remove(id,reason='Dibatalkan oleh pemilik',version) {
+    requireOwner();
     const existing=this.getById(id);
     if(!existing) throw new Error('Faktur belum dimuat. Segarkan daftar terlebih dahulu.');
     return sendPurchase('cancel_purchase',{invoice_id:id,expected_version:version ?? existing.version,reason});

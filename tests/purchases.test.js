@@ -90,7 +90,7 @@ const suppliersStore = {
 
 await mock.module('../src/store.js', {
   namedExports: {
-    auth: { getSession: () => identity, isOwner: () => true },
+    auth: { getSession: () => identity, isOwner: () => identity.role==='owner' },
     prepareRoute: async () => {},
     products: productStore,
     purchases: purchasesStore,
@@ -117,6 +117,7 @@ beforeEach(() => {
   sessionStorage.clear();
   purchaseInvoices = [];
   loadedRanges = [];
+  identity.role='owner';
   product = {
     id: 'p1',
     name: 'Paracetamol 500mg',
@@ -276,6 +277,22 @@ test('purchase date filter fetches the selected range from server',async()=>{
   document.getElementById('filter-end-date').value='2025-02-01';
   document.getElementById('btn-apply-date-filter').click();await settle();
   assert.deepEqual(loadedRanges,[['2025-01-01','2025-02-01']]);
+});
+
+test('cashier purchase page offers creation and details without owner revision actions',async()=>{
+  identity.role='kasir';
+  purchaseInvoices=[{id:'cashier-invoice',invoiceNo:'MINE',invoiceDate:'2026-09-18',items:[],total:0}];
+  controller=renderPurchases('list');
+  assert.ok(document.querySelector('.btn-view-invoice'));
+  assert.equal(document.querySelector('.btn-edit-invoice'),null);
+  assert.equal(document.querySelector('.btn-delete-invoice'),null);
+  document.getElementById('btn-to-create-purchase').click();
+  assert.ok(document.getElementById('btn-save-purchase'));
+  assert.equal(document.getElementById('btn-add-quick-supplier'),null);
+  document.getElementById('inv-no').value='CASHIER-NEW';
+  document.getElementById('btn-save-purchase').click();await settle();
+  assert.equal(purchaseInvoices.length,2);
+  assert.equal(purchaseInvoices[1].invoiceNo,'CASHIER-NEW');
 });
 
 test('double cancellation click sends one request while the first is pending',async()=>{
